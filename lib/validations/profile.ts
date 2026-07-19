@@ -48,14 +48,15 @@ export const tutorProfileSchema = z.object({
   languagesSpoken: languageList(10).min(1, "Select at least one language you speak"),
   teachingLanguages: languageList(10).min(1, "Select at least one language you teach"),
   specializations: z.array(z.enum(SPECIALIZATIONS)).max(SPECIALIZATIONS.length),
-  yearsExperience: z.coerce
-    .number()
-    .int()
-    .min(0)
-    .max(80)
+  // Literal "" must be tried before the coerced-number branch: z.coerce.number()
+  // converts "" to 0, which passes .min(0) and wins the union before the
+  // empty-string branch ever gets a chance, turning a blank field into 0.
+  yearsExperience: z
+    .literal("")
+    .transform(() => null)
+    .or(z.coerce.number().int().min(0).max(80))
     .optional()
-    .or(z.literal(""))
-    .transform((value) => (value === "" || value === undefined ? null : value)),
+    .transform((value) => (value === undefined ? null : value)),
   certifications: z
     .array(z.string().trim().min(1).max(200))
     .max(30)
@@ -70,6 +71,11 @@ export const tutorProfileSchema = z.object({
     .or(z.literal(""))
     .transform((value) => (value === "" || value === undefined ? null : value)),
   availabilityNote: optionalTrimmed(500),
+  subjectIds: z
+    .array(z.coerce.number().int().positive())
+    .max(50)
+    .optional()
+    .transform((value) => value ?? []),
   country,
   timezone: z.string().trim().min(1, "Time zone is required"),
   videoUrl: z

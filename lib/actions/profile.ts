@@ -86,6 +86,7 @@ export async function upsertTutorProfile(
     hourlyPrice: formData.get("hourlyPrice"),
     trialPrice: formData.get("trialPrice"),
     availabilityNote: formData.get("availabilityNote"),
+    subjectIds: getStringArray(formData, "subjectIds"),
     country: formData.get("country"),
     timezone: formData.get("timezone"),
     videoUrl: formData.get("videoUrl"),
@@ -117,6 +118,7 @@ export async function upsertTutorProfile(
     hourlyPrice,
     trialPrice,
     availabilityNote,
+    subjectIds,
     country,
     timezone,
     videoUrl,
@@ -154,8 +156,28 @@ export async function upsertTutorProfile(
     return { error: tutorError.message };
   }
 
+  const { error: deleteSubjectsError } = await supabase
+    .from("tutor_subjects")
+    .delete()
+    .eq("tutor_id", user.id);
+
+  if (deleteSubjectsError) {
+    return { error: deleteSubjectsError.message };
+  }
+
+  if (subjectIds.length > 0) {
+    const { error: insertSubjectsError } = await supabase
+      .from("tutor_subjects")
+      .insert(subjectIds.map((subjectId) => ({ tutor_id: user.id, subject_id: subjectId })));
+
+    if (insertSubjectsError) {
+      return { error: insertSubjectsError.message };
+    }
+  }
+
   revalidatePath("/tutor/profile");
   revalidatePath("/tutor/dashboard");
+  revalidatePath("/student/tutors");
 
   return { message: "Profile saved" };
 }

@@ -27,9 +27,11 @@ export default async function StudentDashboardPage() {
         </Link>
       </div>
 
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">
-        Your bookings and tutor search will show up here starting M4-M7.
-      </p>
+      <Link href="/student/tutors" className="w-fit text-sm font-medium underline underline-offset-2">
+        Find a tutor
+      </Link>
+
+      <p className="text-sm text-zinc-600 dark:text-zinc-400">Your bookings will show up here starting M5.</p>
     </div>
   );
 }

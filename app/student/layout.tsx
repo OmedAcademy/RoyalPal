@@ -13,6 +13,9 @@ export default async function StudentLayout({ children }: { children: React.Reac
           <Link href="/student/dashboard" className="text-sm font-medium">
             Dashboard
           </Link>
+          <Link href="/student/tutors" className="text-sm font-medium">
+            Find a tutor
+          </Link>
           <Link href="/student/profile" className="text-sm font-medium">
             Profile
           </Link>

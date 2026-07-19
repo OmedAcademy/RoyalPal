@@ -9,7 +9,7 @@ import { CheckboxGroup } from "@/components/ui/CheckboxGroup";
 import { COUNTRIES } from "@/lib/constants/countries";
 import { LANGUAGES } from "@/lib/constants/languages";
 import { SPECIALIZATIONS } from "@/lib/constants/profile-options";
-import type { Profile, TutorProfile } from "@/types/database";
+import type { Profile, Subject, TutorProfile } from "@/types/database";
 
 const initialState: ProfileActionState = {};
 
@@ -22,12 +22,21 @@ export function TutorProfileForm({
   profile,
   tutorProfile,
   timezones,
+  subjects,
+  selectedSubjectIds,
 }: {
   profile: Profile;
   tutorProfile: TutorProfile | null;
   timezones: string[];
+  subjects: Subject[];
+  selectedSubjectIds: number[];
 }) {
   const [state, formAction, pending] = useActionState(upsertTutorProfile, initialState);
+  const selected = new Set(selectedSubjectIds);
+  const subjectsByCategory = subjects.reduce<Record<string, Subject[]>>((acc, subject) => {
+    (acc[subject.category] ??= []).push(subject);
+    return acc;
+  }, {});
 
   return (
     <form action={formAction} className="flex max-w-2xl flex-col gap-5">
@@ -83,6 +92,29 @@ export function TutorProfileForm({
         options={SPECIALIZATIONS}
         defaultValues={tutorProfile?.specializations}
       />
+
+      <fieldset className="flex flex-col gap-3">
+        <legend className="text-sm font-medium">Subjects you teach</legend>
+        {Object.entries(subjectsByCategory).map(([category, categorySubjects]) => (
+          <div key={category} className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">{category}</span>
+            <div className="flex flex-wrap gap-x-4 gap-y-2">
+              {categorySubjects.map((subject) => (
+                <label key={subject.id} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    name="subjectIds"
+                    value={subject.id}
+                    defaultChecked={selected.has(subject.id)}
+                    className="accent-foreground"
+                  />
+                  {subject.name}
+                </label>
+              ))}
+            </div>
+          </div>
+        ))}
+      </fieldset>
 
       <div className="grid gap-5 sm:grid-cols-2">
         <TextField

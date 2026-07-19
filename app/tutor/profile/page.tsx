@@ -8,11 +8,11 @@ export default async function TutorProfilePage() {
   const profile = await requireProfile(["tutor"]);
   const supabase = await createClient();
 
-  const { data: tutorProfile } = await supabase
-    .from("tutor_profiles")
-    .select("*")
-    .eq("id", profile.id)
-    .maybeSingle();
+  const [{ data: tutorProfile }, { data: subjects }, { data: tutorSubjects }] = await Promise.all([
+    supabase.from("tutor_profiles").select("*").eq("id", profile.id).maybeSingle(),
+    supabase.from("subjects").select("*").order("category").order("name"),
+    supabase.from("tutor_subjects").select("subject_id").eq("tutor_id", profile.id),
+  ]);
 
   return (
     <div className="flex flex-col gap-8">
@@ -25,7 +25,13 @@ export default async function TutorProfilePage() {
 
       <AvatarUpload currentAvatarUrl={profile.avatar_url} fullName={profile.full_name} />
 
-      <TutorProfileForm profile={profile} tutorProfile={tutorProfile} timezones={getTimezones()} />
+      <TutorProfileForm
+        profile={profile}
+        tutorProfile={tutorProfile}
+        timezones={getTimezones()}
+        subjects={subjects ?? []}
+        selectedSubjectIds={(tutorSubjects ?? []).map((row) => row.subject_id)}
+      />
     </div>
   );
 }
