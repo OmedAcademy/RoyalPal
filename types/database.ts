@@ -1,7 +1,12 @@
 /**
- * Hand-authored to match supabase/migrations/0001-0010 exactly.
+ * Hand-authored to match supabase/migrations/0001-0012 exactly.
  * Once a real Supabase project exists, regenerate and diff against this file with:
  *   npx supabase gen types typescript --project-id <project-id> --schema public
+ *
+ * Every table includes `Relationships: []` and the schema includes empty
+ * Views/Functions maps — required by @supabase/postgrest-js's GenericTable/
+ * GenericSchema constraints for row-type inference to resolve correctly.
+ * Omitting them silently degrades query results to `never`.
  */
 
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
@@ -9,6 +14,7 @@ export type Json = string | number | boolean | null | { [key: string]: Json | un
 export type UserRole = "student" | "tutor" | "admin";
 export type UserStatus = "active" | "suspended";
 export type TutorVerificationStatus = "pending" | "approved" | "rejected";
+export type EnglishLevel = "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
 export type BookingStatus =
   "pending_payment" | "confirmed" | "completed" | "cancelled" | "refunded";
 export type PaymentStatus = "requires_payment" | "succeeded" | "failed" | "refunded";
@@ -22,6 +28,7 @@ export interface Database {
           role: UserRole;
           full_name: string;
           avatar_url: string | null;
+          country: string | null;
           timezone: string;
           phone: string | null;
           status: UserStatus;
@@ -33,6 +40,7 @@ export interface Database {
           role: UserRole;
           full_name: string;
           avatar_url?: string | null;
+          country?: string | null;
           timezone?: string;
           phone?: string | null;
           status?: UserStatus;
@@ -40,23 +48,29 @@ export interface Database {
           updated_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["profiles"]["Insert"]>;
+        Relationships: [];
       };
       student_profiles: {
         Row: {
           id: string;
           learning_goals: string | null;
-          preferred_languages: string[] | null;
+          target_languages: string[] | null;
+          native_language: string | null;
+          english_level: EnglishLevel | null;
           created_at: string;
           updated_at: string;
         };
         Insert: {
           id: string;
           learning_goals?: string | null;
-          preferred_languages?: string[] | null;
+          target_languages?: string[] | null;
+          native_language?: string | null;
+          english_level?: EnglishLevel | null;
           created_at?: string;
           updated_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["student_profiles"]["Insert"]>;
+        Relationships: [];
       };
       tutor_profiles: {
         Row: {
@@ -65,8 +79,15 @@ export interface Database {
           bio: string;
           video_url: string | null;
           hourly_rate_cents: number;
+          trial_price_cents: number | null;
           currency: string;
-          languages: string[];
+          languages_spoken: string[];
+          teaching_languages: string[];
+          specializations: string[];
+          years_experience: number | null;
+          certifications: string[];
+          education: string | null;
+          availability_note: string | null;
           verification_status: TutorVerificationStatus;
           avg_rating: number | null;
           total_reviews: number;
@@ -81,8 +102,15 @@ export interface Database {
           bio: string;
           video_url?: string | null;
           hourly_rate_cents: number;
+          trial_price_cents?: number | null;
           currency?: string;
-          languages?: string[];
+          languages_spoken?: string[];
+          teaching_languages?: string[];
+          specializations?: string[];
+          years_experience?: number | null;
+          certifications?: string[];
+          education?: string | null;
+          availability_note?: string | null;
           verification_status?: TutorVerificationStatus;
           avg_rating?: number | null;
           total_reviews?: number;
@@ -92,6 +120,7 @@ export interface Database {
           updated_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["tutor_profiles"]["Insert"]>;
+        Relationships: [];
       };
       subjects: {
         Row: {
@@ -107,6 +136,7 @@ export interface Database {
           slug: string;
         };
         Update: Partial<Database["public"]["Tables"]["subjects"]["Insert"]>;
+        Relationships: [];
       };
       tutor_subjects: {
         Row: {
@@ -118,6 +148,7 @@ export interface Database {
           subject_id: number;
         };
         Update: Partial<Database["public"]["Tables"]["tutor_subjects"]["Insert"]>;
+        Relationships: [];
       };
       availability_rules: {
         Row: {
@@ -137,6 +168,7 @@ export interface Database {
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["availability_rules"]["Insert"]>;
+        Relationships: [];
       };
       availability_exceptions: {
         Row: {
@@ -158,6 +190,7 @@ export interface Database {
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["availability_exceptions"]["Insert"]>;
+        Relationships: [];
       };
       bookings: {
         Row: {
@@ -195,6 +228,7 @@ export interface Database {
           updated_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["bookings"]["Insert"]>;
+        Relationships: [];
       };
       payments: {
         Row: {
@@ -216,6 +250,7 @@ export interface Database {
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["payments"]["Insert"]>;
+        Relationships: [];
       };
       reviews: {
         Row: {
@@ -237,6 +272,7 @@ export interface Database {
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["reviews"]["Insert"]>;
+        Relationships: [];
       };
       favorites: {
         Row: {
@@ -250,6 +286,7 @@ export interface Database {
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["favorites"]["Insert"]>;
+        Relationships: [];
       };
       admin_actions: {
         Row: {
@@ -269,14 +306,18 @@ export interface Database {
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["admin_actions"]["Insert"]>;
+        Relationships: [];
       };
     };
+    Views: Record<string, never>;
+    Functions: Record<string, never>;
     Enums: {
       user_role: UserRole;
       user_status: UserStatus;
       tutor_verification_status: TutorVerificationStatus;
       booking_status: BookingStatus;
       payment_status: PaymentStatus;
+      english_level: EnglishLevel;
     };
   };
 }
