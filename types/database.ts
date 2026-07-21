@@ -1,5 +1,5 @@
 /**
- * Hand-authored to match supabase/migrations/0001-0012 exactly.
+ * Hand-authored to match supabase/migrations/0001-0018 exactly.
  * Once a real Supabase project exists, regenerate and diff against this file with:
  *   npx supabase gen types typescript --project-id <project-id> --schema public
  *
@@ -17,7 +17,7 @@ export type TutorVerificationStatus = "pending" | "approved" | "rejected";
 export type EnglishLevel = "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
 export type BookingStatus =
   "pending_payment" | "confirmed" | "completed" | "cancelled" | "refunded";
-export type PaymentStatus = "requires_payment" | "succeeded" | "failed" | "refunded";
+export type PaymentStatus = "requires_payment" | "succeeded" | "failed" | "refunded" | "expired";
 
 export interface Database {
   public: {
@@ -234,19 +234,23 @@ export interface Database {
         Row: {
           id: string;
           booking_id: string;
-          stripe_payment_intent_id: string;
+          stripe_payment_intent_id: string | null;
+          checkout_session_id: string | null;
           amount_cents: number;
           status: PaymentStatus;
           currency: string;
+          paid_at: string | null;
           created_at: string;
         };
         Insert: {
           id?: string;
           booking_id: string;
-          stripe_payment_intent_id: string;
+          stripe_payment_intent_id?: string | null;
+          checkout_session_id?: string | null;
           amount_cents: number;
           status?: PaymentStatus;
           currency?: string;
+          paid_at?: string | null;
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["payments"]["Insert"]>;
@@ -326,6 +330,8 @@ export type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 export type StudentProfile = Database["public"]["Tables"]["student_profiles"]["Row"];
 export type TutorProfile = Database["public"]["Tables"]["tutor_profiles"]["Row"];
 export type Subject = Database["public"]["Tables"]["subjects"]["Row"];
+export type AvailabilityRule = Database["public"]["Tables"]["availability_rules"]["Row"];
+export type AvailabilityException = Database["public"]["Tables"]["availability_exceptions"]["Row"];
 export type Booking = Database["public"]["Tables"]["bookings"]["Row"];
 export type Payment = Database["public"]["Tables"]["payments"]["Row"];
 export type Review = Database["public"]["Tables"]["reviews"]["Row"];

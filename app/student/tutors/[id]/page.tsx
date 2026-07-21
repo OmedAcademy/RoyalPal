@@ -1,10 +1,14 @@
 import { notFound } from "next/navigation";
+import Link from "next/link";
 import { requireProfile } from "@/lib/supabase/queries";
 import { createClient } from "@/lib/supabase/server";
 import { getTutorById } from "@/lib/supabase/tutor-search";
 
 function priceLabel(cents: number, currency: string): string {
-  return (cents / 100).toLocaleString(undefined, { style: "currency", currency: currency.toUpperCase() });
+  return (cents / 100).toLocaleString(undefined, {
+    style: "currency",
+    currency: currency.toUpperCase(),
+  });
 }
 
 export default async function TutorDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -29,7 +33,11 @@ export default async function TutorDetailPage({ params }: { params: Promise<{ id
         <div className="h-20 w-20 shrink-0 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
           {tutor.avatar_url ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={tutor.avatar_url} alt={tutor.full_name} className="h-full w-full object-cover" />
+            <img
+              src={tutor.avatar_url}
+              alt={tutor.full_name}
+              className="h-full w-full object-cover"
+            />
           ) : (
             <span className="flex h-full w-full items-center justify-center text-2xl font-semibold text-zinc-500">
               {initial}
@@ -56,7 +64,9 @@ export default async function TutorDetailPage({ params }: { params: Promise<{ id
         <div>
           <p className="text-zinc-500 dark:text-zinc-400">Rating</p>
           <p className="font-medium">
-            {tutor.avg_rating !== null ? `★ ${tutor.avg_rating.toFixed(1)} (${tutor.total_reviews})` : "No reviews yet"}
+            {tutor.avg_rating !== null
+              ? `★ ${tutor.avg_rating.toFixed(1)} (${tutor.total_reviews})`
+              : "No reviews yet"}
           </p>
         </div>
       </div>
@@ -80,20 +90,24 @@ export default async function TutorDetailPage({ params }: { params: Promise<{ id
       {tutor.teaching_languages.length > 0 && (
         <div>
           <h2 className="mb-1 text-sm font-medium">Teaches in</h2>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">{tutor.teaching_languages.join(", ")}</p>
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            {tutor.teaching_languages.join(", ")}
+          </p>
         </div>
       )}
 
       {tutor.specializations.length > 0 && (
         <div>
           <h2 className="mb-1 text-sm font-medium">Specializations</h2>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">{tutor.specializations.join(", ")}</p>
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            {tutor.specializations.join(", ")}
+          </p>
         </div>
       )}
 
       <div>
         <h2 className="mb-1 text-sm font-medium">About</h2>
-        <p className="whitespace-pre-wrap text-sm text-zinc-600 dark:text-zinc-400">{tutor.bio}</p>
+        <p className="text-sm whitespace-pre-wrap text-zinc-600 dark:text-zinc-400">{tutor.bio}</p>
       </div>
 
       {tutor.video_url && (
@@ -107,9 +121,12 @@ export default async function TutorDetailPage({ params }: { params: Promise<{ id
         </a>
       )}
 
-      <p className="text-sm text-zinc-500 dark:text-zinc-400">
-        Booking lessons is coming in a later milestone.
-      </p>
+      <Link
+        href={`/student/tutors/${tutor.id}/book`}
+        className="bg-foreground text-background w-fit rounded-md px-4 py-2 font-medium"
+      >
+        Book a lesson
+      </Link>
     </div>
   );
 }

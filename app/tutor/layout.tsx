@@ -13,6 +13,12 @@ export default async function TutorLayout({ children }: { children: React.ReactN
           <Link href="/tutor/dashboard" className="text-sm font-medium">
             Dashboard
           </Link>
+          <Link href="/tutor/bookings" className="text-sm font-medium">
+            Bookings
+          </Link>
+          <Link href="/tutor/availability" className="text-sm font-medium">
+            Availability
+          </Link>
           <Link href="/tutor/profile" className="text-sm font-medium">
             Profile
           </Link>

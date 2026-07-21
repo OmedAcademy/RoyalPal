@@ -37,8 +37,15 @@ export async function updateStudentProfile(
     return { error: "You must be signed in" };
   }
 
-  const { fullName, country, timezone, nativeLanguage, targetLanguages, englishLevel, learningGoals } =
-    parsed.data;
+  const {
+    fullName,
+    country,
+    timezone,
+    nativeLanguage,
+    targetLanguages,
+    englishLevel,
+    learningGoals,
+  } = parsed.data;
 
   const { error: profileError } = await supabase
     .from("profiles")

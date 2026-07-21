@@ -25,7 +25,11 @@ export default async function StudentProfilePage() {
 
       <AvatarUpload currentAvatarUrl={profile.avatar_url} fullName={profile.full_name} />
 
-      <StudentProfileForm profile={profile} studentProfile={studentProfile} timezones={getTimezones()} />
+      <StudentProfileForm
+        profile={profile}
+        studentProfile={studentProfile}
+        timezones={getTimezones()}
+      />
     </div>
   );
 }

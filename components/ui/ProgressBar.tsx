@@ -22,7 +22,7 @@ export function ProgressBar({ percentage, label }: ProgressBarProps) {
         className="h-2 w-full overflow-hidden rounded-full bg-black/10 dark:bg-white/10"
       >
         <div
-          className="h-full rounded-full bg-foreground transition-all"
+          className="bg-foreground h-full rounded-full transition-all"
           style={{ width: `${clamped}%` }}
         />
       </div>

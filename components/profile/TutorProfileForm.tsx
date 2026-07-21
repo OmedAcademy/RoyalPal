@@ -62,7 +62,12 @@ export function TutorProfileForm({
       />
 
       <div className="grid gap-5 sm:grid-cols-2">
-        <SelectField label="Country" name="country" options={COUNTRIES} defaultValue={profile.country} />
+        <SelectField
+          label="Country"
+          name="country"
+          options={COUNTRIES}
+          defaultValue={profile.country}
+        />
         <SelectField
           label="Time zone"
           name="timezone"

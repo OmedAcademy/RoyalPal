@@ -34,7 +34,12 @@ export function StudentProfileForm({
       <TextField label="Full name" name="fullName" defaultValue={profile.full_name} required />
 
       <div className="grid gap-5 sm:grid-cols-2">
-        <SelectField label="Country" name="country" options={COUNTRIES} defaultValue={profile.country} />
+        <SelectField
+          label="Country"
+          name="country"
+          options={COUNTRIES}
+          defaultValue={profile.country}
+        />
         <SelectField
           label="Time zone"
           name="timezone"

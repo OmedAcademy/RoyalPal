@@ -54,7 +54,9 @@ export function AvatarUpload({
           >
             {pending ? "Uploading..." : "Upload photo"}
           </button>
-          {state.message && <span className="text-sm text-green-700 dark:text-green-400">{state.message}</span>}
+          {state.message && (
+            <span className="text-sm text-green-700 dark:text-green-400">{state.message}</span>
+          )}
           {state.error && (
             <span role="alert" className="text-sm text-red-600 dark:text-red-400">
               {state.error}

@@ -46,7 +46,9 @@ export default async function FindTutorsPage({
       />
 
       {tutors.length === 0 ? (
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">No tutors match those filters yet.</p>
+        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          No tutors match those filters yet.
+        </p>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {tutors.map((tutor) => (
