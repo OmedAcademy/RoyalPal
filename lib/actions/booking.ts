@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
+import { activeUserOrError } from "@/lib/supabase/queries";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createBookingCheckoutSession } from "@/lib/stripe/checkout";
 import {
@@ -11,12 +12,17 @@ import {
   retryBookingPaymentSchema,
   cancelBookingSchema,
 } from "@/lib/validations/booking";
+import { NotificationService } from "@/lib/notifications/service";
+import { MeetingService } from "@/lib/meet/service";
+import { logger } from "@/lib/observability/logger";
 import type { Database } from "@/types/database";
 
 export type BookingActionState = {
   error?: string;
   message?: string;
 };
+
+const log = logger.child({ component: "booking-action" });
 
 const EXCLUSION_VIOLATION = "23P01";
 
@@ -65,34 +71,62 @@ async function startCheckout(
   // Written via the admin client because payments has no client-facing
   // insert/update policy (see supabase/migrations/0007_payments.sql) — this
   // is the same trust boundary as the webhook handler, just triggered from
-  // a Server Action instead of an inbound Stripe event. Upserted (not
-  // inserted) so a retry can reuse the same row with a fresh session id.
-  const admin = createAdminClient();
-  const { error: paymentError } = await admin.from("payments").upsert(
-    {
-      booking_id: booking.id,
-      checkout_session_id: session.id,
-      // Null until the customer pays: Checkout Sessions don't create their
-      // PaymentIntent until payment is submitted, so it can't be known here.
-      // The webhook records the real id on payment_intent.succeeded /
-      // checkout.session.completed.
-      stripe_payment_intent_id:
-        typeof session.payment_intent === "string"
-          ? session.payment_intent
-          : (session.payment_intent?.id ?? null),
-      amount_cents: booking.price_cents,
-      currency: booking.currency,
-      status: "requires_payment",
-      paid_at: null,
-    },
-    { onConflict: "booking_id" },
-  );
+  // a Server Action instead of an inbound Stripe event.
+  //
+  // NEVER a blind upsert. A plain upsert on booking_id unconditionally set
+  // status='requires_payment', paid_at=null, which silently downgraded an
+  // already-`succeeded` row whenever the webhook for the previous session
+  // landed during this function's Stripe round trip — leaving a confirmed,
+  // paid booking whose ledger row claimed it was unpaid.
+  // The `.neq("status", "succeeded")` makes the guard atomic in the database
+  // rather than a check-then-act in application code.
+  // Regression coverage: lib/actions/payment-race.test.ts.
+  const attempt = {
+    booking_id: booking.id,
+    checkout_session_id: session.id,
+    // Null until the customer pays: Checkout Sessions don't create their
+    // PaymentIntent until payment is submitted, so it can't be known here.
+    // The webhook records the real id on payment_intent.succeeded /
+    // checkout.session.completed.
+    stripe_payment_intent_id:
+      typeof session.payment_intent === "string"
+        ? session.payment_intent
+        : (session.payment_intent?.id ?? null),
+    amount_cents: booking.price_cents,
+    currency: booking.currency,
+    status: "requires_payment" as const,
+    paid_at: null,
+  };
 
-  if (paymentError) {
-    // Non-fatal: the webhook upserts this same row when the payment
-    // succeeds, so a dropped write here doesn't lose the payment record —
-    // just log it and let checkout proceed.
-    console.error("[booking] failed to record payment attempt", paymentError);
+  const admin = createAdminClient();
+  const { data: updated, error: updateError } = await admin
+    .from("payments")
+    .update(attempt)
+    .eq("booking_id", booking.id)
+    .neq("status", "succeeded")
+    .select("id");
+
+  if (updateError) {
+    log.error("failed to update payment attempt", updateError, { bookingId: booking.id });
+  }
+
+  // No row updated: either none exists yet, or the existing row is already
+  // succeeded and must be left alone. Insert only in the former case.
+  if (!updated || updated.length === 0) {
+    const { data: existing } = await admin
+      .from("payments")
+      .select("id")
+      .eq("booking_id", booking.id)
+      .maybeSingle();
+
+    if (!existing) {
+      const { error: insertError } = await admin.from("payments").insert(attempt);
+      if (insertError) {
+        // Non-fatal: the webhook upserts this same row when the payment
+        // succeeds, so a dropped write here doesn't lose the payment record.
+        log.error("failed to record payment attempt", insertError, { bookingId: booking.id });
+      }
+    }
   }
 
   return session.url;
@@ -121,13 +155,11 @@ export async function createBooking(
   }
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return { error: "You must be signed in" };
+  const auth = await activeUserOrError(supabase);
+  if ("error" in auth) {
+    return { error: auth.error };
   }
+  const user = auth.user;
 
   const { data: tutorProfile } = await supabase
     .from("tutor_profiles")
@@ -203,9 +235,17 @@ export async function createBooking(
       .from("bookings")
       .update({ status: "cancelled", cancellation_reason: "Payment setup failed" })
       .eq("id", booking.id);
-    console.error("[booking] failed to start checkout", err);
+    log.error("failed to start checkout", err, { bookingId: booking.id });
     return { error: "We couldn't start checkout. Please try again." };
   }
+
+  await NotificationService.emit({
+    userId: user.id,
+    type: "booking_created",
+    title: "Lesson reserved",
+    body: "Complete payment to confirm your booking.",
+    data: { href: "/student/bookings" },
+  });
 
   revalidatePath("/student/bookings");
   revalidatePath("/tutor/bookings");
@@ -231,13 +271,11 @@ export async function retryBookingPayment(
   const { bookingId } = parsed.data;
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return { error: "You must be signed in" };
+  const auth = await activeUserOrError(supabase);
+  if ("error" in auth) {
+    return { error: auth.error };
   }
+  const user = auth.user;
 
   const { data: booking } = await supabase
     .from("bookings")
@@ -270,8 +308,25 @@ export async function retryBookingPayment(
   try {
     checkoutUrl = await startCheckout(supabase, booking);
   } catch (err) {
-    console.error("[booking] failed to restart checkout", err);
+    log.error("failed to restart checkout", err, { bookingId });
     return { error: "We couldn't start checkout. Please try again." };
+  }
+
+  // Re-verify AFTER the Stripe round trip. Opening a Checkout Session takes
+  // hundreds of milliseconds, and the webhook for the previous session can
+  // settle inside that window (student pays in one tab, clicks "Complete
+  // payment" in a stale one). Without this re-read we would hand the student
+  // a second payment page for a lesson they already paid for — a real double
+  // charge, whose webhook the idempotency guard then silently discards.
+  // The abandoned session simply expires on Stripe's side.
+  const { data: current } = await supabase
+    .from("bookings")
+    .select("status")
+    .eq("id", bookingId)
+    .maybeSingle();
+
+  if (current?.status !== "pending_payment") {
+    return { message: "This booking is already paid — no further payment is needed." };
   }
 
   redirect(checkoutUrl);
@@ -291,21 +346,38 @@ export async function cancelBooking(
   }
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return { error: "You must be signed in" };
+  const auth = await activeUserOrError(supabase);
+  if ("error" in auth) {
+    return { error: auth.error };
   }
+  const user = auth.user;
 
-  const { error } = await supabase
+  const { data: cancelled, error } = await supabase
     .from("bookings")
     .update({ status: "cancelled", cancellation_reason: parsed.data.reason })
-    .eq("id", parsed.data.bookingId);
+    .eq("id", parsed.data.bookingId)
+    .select("student_id, tutor_id")
+    .maybeSingle();
 
   if (error) {
     return { error: error.message };
+  }
+
+  // Tear down the live classroom so the Meet room is invalidated and both
+  // parties' calendars are updated. Best-effort: the booking is already
+  // cancelled and must stay cancelled even if the provider is unreachable.
+  await MeetingService.cancelMeeting(parsed.data.bookingId);
+
+  // Notify the other participant (whoever didn't cancel).
+  if (cancelled) {
+    const other = cancelled.student_id === user.id ? cancelled.tutor_id : cancelled.student_id;
+    await NotificationService.emit({
+      userId: other,
+      type: "booking_cancelled",
+      title: "A lesson was cancelled",
+      body: parsed.data.reason ?? undefined,
+      data: { href: other === cancelled.tutor_id ? "/tutor/bookings" : "/student/bookings" },
+    });
   }
 
   revalidatePath("/student/bookings");

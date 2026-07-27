@@ -1,0 +1,273 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import type Stripe from "stripe";
+import { createFakeSupabase, type Tables } from "@/tests/helpers/fake-supabase";
+
+/**
+ * Stripe webhook correctness.
+ *
+ * Stripe guarantees *at-least-once* delivery with no ordering guarantee, so
+ * these handlers must be idempotent and order-independent. Money correctness
+ * depends on it: a duplicate delivery must not double-record a payment, and
+ * a late `payment_failed` for a superseded attempt must not downgrade a
+ * booking the student already paid for.
+ *
+ * Assertions are on final row state (via an in-memory Supabase fake), not on
+ * call counts, so they test behaviour rather than implementation.
+ */
+
+const BOOKING = "b1";
+const STUDENT = "s1";
+const TUTOR = "t1";
+
+let fake: ReturnType<typeof createFakeSupabase>;
+const emitMany = vi.fn();
+const emit = vi.fn();
+
+vi.mock("@/lib/supabase/admin", () => ({
+  createAdminClient: () => fake.client,
+}));
+
+vi.mock("@/lib/notifications/service", () => ({
+  NotificationService: {
+    emit: (...args: unknown[]) => emit(...args),
+    emitMany: (...args: unknown[]) => emitMany(...args),
+  },
+}));
+
+const {
+  handleCheckoutSessionCompleted,
+  handlePaymentIntentSucceeded,
+  handlePaymentIntentFailed,
+  handleCheckoutSessionExpired,
+} = await import("@/lib/stripe/webhook-handlers");
+
+function seed(overrides?: Partial<Tables>) {
+  fake = createFakeSupabase({
+    bookings: [{ id: BOOKING, status: "pending_payment", student_id: STUDENT, tutor_id: TUTOR }],
+    payments: [
+      {
+        id: "p1",
+        booking_id: BOOKING,
+        checkout_session_id: "cs_1",
+        stripe_payment_intent_id: null,
+        status: "requires_payment",
+        amount_cents: 5000,
+        currency: "usd",
+        paid_at: null,
+      },
+    ],
+    ...overrides,
+  });
+}
+
+const booking = () => fake.db.bookings[0];
+const payments = () => fake.db.payments;
+const payment = () => fake.db.payments[0];
+
+const session = (over: Partial<Stripe.Checkout.Session> = {}) =>
+  ({
+    id: "cs_1",
+    metadata: { booking_id: BOOKING, app: "royalpal" },
+    payment_status: "paid",
+    payment_intent: "pi_1",
+    amount_total: 5000,
+    currency: "usd",
+    ...over,
+  }) as unknown as Stripe.Checkout.Session;
+
+const intent = (over: Partial<Stripe.PaymentIntent> = {}) =>
+  ({
+    id: "pi_1",
+    metadata: { booking_id: BOOKING, app: "royalpal" },
+    amount: 5000,
+    currency: "usd",
+    ...over,
+  }) as unknown as Stripe.PaymentIntent;
+
+beforeEach(() => {
+  seed();
+  emit.mockClear();
+  emitMany.mockClear();
+});
+
+describe("checkout.session.completed", () => {
+  it("records the payment and confirms the booking", async () => {
+    await handleCheckoutSessionCompleted(session());
+
+    expect(payment().status).toBe("succeeded");
+    expect(payment().stripe_payment_intent_id).toBe("pi_1");
+    expect(payment().paid_at).not.toBeNull();
+    expect(booking().status).toBe("confirmed");
+    expect(emitMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a session that is not yet paid (delayed payment methods)", async () => {
+    await handleCheckoutSessionCompleted(session({ payment_status: "unpaid" }));
+
+    expect(payment().status).toBe("requires_payment");
+    expect(booking().status).toBe("pending_payment");
+  });
+
+  it("ignores events with no booking_id metadata", async () => {
+    await handleCheckoutSessionCompleted(session({ metadata: { app: "royalpal" } }));
+    expect(booking().status).toBe("pending_payment");
+  });
+
+  it("ignores a paid session with no payment_intent", async () => {
+    await handleCheckoutSessionCompleted(session({ payment_intent: null }));
+    expect(booking().status).toBe("pending_payment");
+  });
+});
+
+describe("payment_intent.succeeded", () => {
+  it("records the payment and confirms the booking", async () => {
+    await handlePaymentIntentSucceeded(intent());
+
+    expect(payment().status).toBe("succeeded");
+    expect(booking().status).toBe("confirmed");
+  });
+
+  it("does not clobber a checkout_session_id it does not carry", async () => {
+    await handlePaymentIntentSucceeded(intent());
+    expect(payment().checkout_session_id).toBe("cs_1");
+  });
+});
+
+describe("idempotency — at-least-once delivery", () => {
+  it("duplicate checkout.session.completed does not duplicate the payment row", async () => {
+    await handleCheckoutSessionCompleted(session());
+    await handleCheckoutSessionCompleted(session());
+
+    expect(payments()).toHaveLength(1);
+    expect(payment().status).toBe("succeeded");
+    expect(booking().status).toBe("confirmed");
+  });
+
+  it("duplicate delivery notifies only once", async () => {
+    await handleCheckoutSessionCompleted(session());
+    await handleCheckoutSessionCompleted(session());
+
+    expect(emitMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("both event types for one payment produce a single succeeded row", async () => {
+    await handleCheckoutSessionCompleted(session());
+    await handlePaymentIntentSucceeded(intent());
+
+    expect(payments()).toHaveLength(1);
+    expect(payment().status).toBe("succeeded");
+    expect(emitMany).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("out-of-order delivery", () => {
+  it("payment_intent.succeeded arriving before checkout.session.completed still settles correctly", async () => {
+    await handlePaymentIntentSucceeded(intent());
+    await handleCheckoutSessionCompleted(session());
+
+    expect(payments()).toHaveLength(1);
+    expect(payment().status).toBe("succeeded");
+    expect(booking().status).toBe("confirmed");
+    expect(emitMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("a late payment_failed cannot downgrade an already-succeeded payment", async () => {
+    await handlePaymentIntentSucceeded(intent());
+    await handlePaymentIntentFailed(intent());
+
+    expect(payment().status).toBe("succeeded");
+    expect(booking().status).toBe("confirmed");
+  });
+
+  it("a late checkout.session.expired cannot cancel a confirmed booking", async () => {
+    await handleCheckoutSessionCompleted(session());
+    await handleCheckoutSessionExpired(session());
+
+    expect(booking().status).toBe("confirmed");
+    expect(payment().status).toBe("succeeded");
+  });
+});
+
+describe("payment_intent.payment_failed", () => {
+  it("marks the current attempt failed and leaves the booking pending", async () => {
+    // Payment row already points at this attempt.
+    payment().stripe_payment_intent_id = "pi_1";
+
+    await handlePaymentIntentFailed(intent());
+
+    expect(payment().status).toBe("failed");
+    expect(booking().status).toBe("pending_payment");
+    expect(emit).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a failure for a superseded attempt (student retried with a new intent)", async () => {
+    payment().stripe_payment_intent_id = "pi_2"; // live attempt is pi_2
+
+    await handlePaymentIntentFailed(intent({ id: "pi_1" })); // stale pi_1 fails
+
+    expect(payment().status).toBe("requires_payment");
+    expect(emit).not.toHaveBeenCalled();
+  });
+});
+
+describe("checkout.session.expired", () => {
+  it("expires the payment and releases the pending booking", async () => {
+    await handleCheckoutSessionExpired(session());
+
+    expect(payment().status).toBe("expired");
+    expect(booking().status).toBe("cancelled");
+    expect(booking().cancellation_reason).toBe("Payment session expired");
+  });
+
+  it("ignores an expiry for a superseded session", async () => {
+    payment().checkout_session_id = "cs_2"; // live attempt is cs_2
+
+    await handleCheckoutSessionExpired(session({ id: "cs_1" }));
+
+    expect(payment().status).toBe("requires_payment");
+    expect(booking().status).toBe("pending_payment");
+  });
+});
+
+describe("shared Stripe account isolation (Lingora)", () => {
+  // The account is shared: Stripe delivers every subscribed event type to
+  // every endpoint on it, so Lingora's payment events arrive here too.
+  const foreign = { booking_id: BOOKING, app: "lingora" };
+
+  it("ignores another app's checkout.session.completed even with a booking_id", async () => {
+    await handleCheckoutSessionCompleted(session({ metadata: foreign }));
+
+    expect(payment().status).toBe("requires_payment");
+    expect(booking().status).toBe("pending_payment");
+    expect(emitMany).not.toHaveBeenCalled();
+  });
+
+  it("ignores another app's payment_intent.succeeded", async () => {
+    await handlePaymentIntentSucceeded(intent({ metadata: foreign }));
+
+    expect(payment().status).toBe("requires_payment");
+    expect(booking().status).toBe("pending_payment");
+  });
+
+  it("ignores another app's payment_intent.payment_failed", async () => {
+    payment().stripe_payment_intent_id = "pi_1";
+
+    await handlePaymentIntentFailed(intent({ metadata: foreign }));
+
+    expect(payment().status).toBe("requires_payment");
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("ignores another app's checkout.session.expired (does not free our slot)", async () => {
+    await handleCheckoutSessionExpired(session({ metadata: foreign }));
+
+    expect(booking().status).toBe("pending_payment");
+    expect(payment().status).toBe("requires_payment");
+  });
+
+  it("fails closed on untagged events (unknown third app on the account)", async () => {
+    await handleCheckoutSessionCompleted(session({ metadata: { booking_id: BOOKING } }));
+
+    expect(booking().status).toBe("pending_payment");
+  });
+});

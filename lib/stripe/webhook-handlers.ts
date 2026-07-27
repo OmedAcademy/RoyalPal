@@ -1,11 +1,35 @@
 import "server-only";
 import type Stripe from "stripe";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { NotificationService } from "@/lib/notifications/service";
+import { isRoyalPalMetadata } from "@/lib/stripe/app-metadata";
+import { MeetingService } from "@/lib/meet/service";
+import { logger } from "@/lib/observability/logger";
 import type { Database } from "@/types/database";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
+// bookingId is the payment correlation key: it ties a Checkout Session, a
+// PaymentIntent and the resulting booking together across separate events.
+const log = logger.child({ component: "stripe-webhook" });
+
+/**
+ * Extracts the booking id ONLY from events this application owns.
+ *
+ * The Stripe account is shared with Lingora, and Stripe fans every subscribed
+ * event type out to every webhook endpoint on the account — so this endpoint
+ * receives Lingora's payment events too. Previously the sole separator was
+ * "does this event carry a booking_id?", which is unsafe for a sibling
+ * tutoring product that plausibly uses the same key: a foreign event would
+ * reach markPaymentSucceeded and attempt to write a payments row for a
+ * booking id that does not exist here (foreign-key violation, error noise,
+ * and a real cross-contamination risk if the id spaces ever overlap).
+ *
+ * Requiring `app === "royalpal"` makes ownership explicit and fails closed:
+ * untagged or unknown-app events are ignored.
+ */
 function bookingIdFromMetadata(metadata: Stripe.Metadata | null | undefined): string | null {
+  if (!isRoyalPalMetadata(metadata)) return null;
   return metadata?.booking_id ?? null;
 }
 
@@ -63,13 +87,13 @@ async function markPaymentSucceeded(
     .upsert(payload, { onConflict: "booking_id" });
 
   if (paymentError) {
-    console.error("[stripe webhook] failed to record successful payment", paymentError);
+    log.error("failed to record successful payment", paymentError, { bookingId: params.bookingId });
     return;
   }
 
   const { data: booking } = await admin
     .from("bookings")
-    .select("status")
+    .select("status, student_id, tutor_id")
     .eq("id", params.bookingId)
     .maybeSingle();
 
@@ -81,8 +105,33 @@ async function markPaymentSucceeded(
       .eq("status", "pending_payment");
 
     if (confirmError) {
-      console.error("[stripe webhook] failed to confirm booking", confirmError);
+      log.error("failed to confirm booking", confirmError, { bookingId: params.bookingId });
+      return;
     }
+
+    // Create the live classroom on the pending→confirmed transition only, so
+    // duplicate webhook deliveries cannot mint a second Meet room. Never
+    // throws: money is already captured, and MeetingService records a failed
+    // status for a later retry rather than failing the payment.
+    await MeetingService.createMeeting(params.bookingId);
+
+    // Notify both parties — once, on the actual pending→confirmed transition.
+    await NotificationService.emitMany([
+      {
+        userId: booking.student_id,
+        type: "payment_succeeded",
+        title: "Payment received",
+        body: "Your lesson is confirmed.",
+        data: { href: "/student/bookings" },
+      },
+      {
+        userId: booking.tutor_id,
+        type: "booking_confirmed",
+        title: "New confirmed lesson",
+        body: "A student just booked and paid for a lesson.",
+        data: { href: "/tutor/bookings" },
+      },
+    ]);
   }
 }
 
@@ -100,7 +149,10 @@ export async function handleCheckoutSessionCompleted(
 
   const paymentIntentId = extractPaymentIntentId(session.payment_intent);
   if (!paymentIntentId) {
-    console.error("[stripe webhook] checkout.session.completed missing payment_intent", session.id);
+    log.error("checkout.session.completed missing payment_intent", undefined, {
+      bookingId,
+      sessionId: session.id,
+    });
     return;
   }
 
@@ -171,7 +223,25 @@ export async function handlePaymentIntentFailed(
     .eq("stripe_payment_intent_id", paymentIntent.id);
 
   if (error) {
-    console.error("[stripe webhook] failed to record failed payment", error);
+    log.error("failed to record failed payment", error, {
+      bookingId,
+      paymentIntentId: paymentIntent.id,
+    });
+  }
+
+  const { data: booking } = await admin
+    .from("bookings")
+    .select("student_id")
+    .eq("id", bookingId)
+    .maybeSingle();
+  if (booking) {
+    await NotificationService.emit({
+      userId: booking.student_id,
+      type: "payment_failed",
+      title: "Payment didn't go through",
+      body: "Your card was declined. You can retry payment from your bookings.",
+      data: { href: "/student/bookings" },
+    });
   }
 }
 
@@ -193,7 +263,10 @@ export async function handleCheckoutSessionExpired(
     .eq("checkout_session_id", session.id);
 
   if (paymentError) {
-    console.error("[stripe webhook] failed to record expired payment", paymentError);
+    log.error("failed to record expired payment", paymentError, {
+      bookingId,
+      sessionId: session.id,
+    });
   }
 
   // Only release the slot if the booking is still waiting on this exact
@@ -208,6 +281,9 @@ export async function handleCheckoutSessionExpired(
     .eq("status", "pending_payment");
 
   if (cancelError) {
-    console.error("[stripe webhook] failed to cancel expired booking", cancelError);
+    log.error("failed to cancel expired booking", cancelError, {
+      bookingId,
+      sessionId: session.id,
+    });
   }
 }
