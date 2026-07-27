@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { optionalText } from "@/lib/validations/shared";
 
 export const createBookingSchema = z.object({
   tutorId: z.string().uuid(),
@@ -19,11 +20,7 @@ export const retryBookingPaymentSchema = z.object({
 
 export const cancelBookingSchema = z.object({
   bookingId: z.string().uuid(),
-  reason: z
-    .string()
-    .trim()
-    .max(500)
-    .optional()
-    .or(z.literal(""))
-    .transform((value) => (value ? value : null)),
+  // The cancel button submits no reason field at all, so this must accept
+  // null — see optionalText for the bug this fixes.
+  reason: optionalText(500),
 });

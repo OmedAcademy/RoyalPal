@@ -60,12 +60,17 @@ export async function updateSession(request: NextRequest) {
 
     const { data: profile } = await supabase
       .from("profiles")
-      .select("role")
+      .select("role, status")
       .eq("id", user.id)
       .single();
 
     if (!profile) {
       return NextResponse.redirect(new URL("/login", request.url));
+    }
+
+    // Suspended accounts are cut off at the edge, before any page renders.
+    if (profile.status === "suspended") {
+      return NextResponse.redirect(new URL("/suspended", request.url));
     }
 
     if (profile.role !== matchedPrefix && profile.role !== "admin") {

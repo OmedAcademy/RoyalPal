@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { activeUserOrError } from "@/lib/supabase/queries";
 
 export type AvatarActionState = {
   error?: string;
@@ -35,13 +36,11 @@ export async function uploadAvatar(
   }
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return { error: "You must be signed in" };
+  const auth = await activeUserOrError(supabase);
+  if ("error" in auth) {
+    return { error: auth.error };
   }
+  const user = auth.user;
 
   const path = `${user.id}/avatar.${extensionFor(file.type)}`;
 

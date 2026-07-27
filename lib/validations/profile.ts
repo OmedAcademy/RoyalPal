@@ -1,24 +1,28 @@
 import { z } from "zod";
-import { COUNTRIES } from "@/lib/constants/countries";
-import { LANGUAGES } from "@/lib/constants/languages";
+import { COUNTRY_NAME_SET } from "@/lib/constants/countries";
+import { LANGUAGE_NAME_SET } from "@/lib/constants/languages";
 import { ENGLISH_LEVELS, SPECIALIZATIONS } from "@/lib/constants/profile-options";
+import { optionalText } from "@/lib/validations/shared";
+import { isSafeHttpUrl } from "@/lib/utils/url";
 
-const optionalTrimmed = (max: number) =>
-  z
-    .string()
-    .trim()
-    .max(max)
-    .optional()
-    .or(z.literal(""))
-    .transform((value) => (value ? value : null));
+// Shared with booking/review validation — see lib/validations/shared.ts for
+// why null tolerance matters for FormData-backed optional fields.
+const optionalTrimmed = optionalText;
 
+// Membership-based validation (the datasets are far too large for z.enum's
+// literal tuples). Empty/absent -> null; any provided value must be a known
+// canonical country name.
 const country = z
-  .enum(COUNTRIES)
+  .string()
   .optional()
-  .or(z.literal(""))
-  .transform((value) => (value ? value : null));
+  .transform((value) => (value && value.trim() ? value.trim() : null))
+  .refine((value) => value === null || COUNTRY_NAME_SET.has(value), {
+    message: "Select a country from the list",
+  });
 
-const language = z.enum(LANGUAGES);
+const language = z.string().refine((value) => LANGUAGE_NAME_SET.has(value), {
+  message: "Select a language from the list",
+});
 
 const languageList = (max: number) => z.array(language).max(max);
 
@@ -78,10 +82,13 @@ export const tutorProfileSchema = z.object({
     .transform((value) => value ?? []),
   country,
   timezone: z.string().trim().min(1, "Time zone is required"),
+  // Scheme-restricted: z.url() alone accepts `javascript:` and `data:`, which
+  // this value reaches an <a href> with on the public tutor page.
   videoUrl: z
     .string()
     .trim()
     .url("Enter a valid URL")
+    .refine(isSafeHttpUrl, "Video links must start with http:// or https://")
     .optional()
     .or(z.literal(""))
     .transform((value) => (value ? value : null)),
