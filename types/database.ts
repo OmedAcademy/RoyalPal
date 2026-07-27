@@ -1,5 +1,5 @@
 /**
- * Hand-authored to match supabase/migrations/0001-0018 exactly.
+ * Hand-authored to match supabase/migrations/0001-0019 exactly.
  * Once a real Supabase project exists, regenerate and diff against this file with:
  *   npx supabase gen types typescript --project-id <project-id> --schema public
  *
@@ -203,6 +203,13 @@ export interface Database {
           lesson_duration_minutes: number;
           status: BookingStatus;
           meeting_link: string | null;
+          // Live-classroom fields (migration 0022). Written exclusively by
+          // MeetingService via the service role.
+          meeting_provider: string | null;
+          meeting_url: string | null;
+          meeting_id: string | null;
+          calendar_event_id: string | null;
+          meeting_status: string;
           price_cents: number;
           platform_fee_cents: number;
           currency: string;
@@ -220,6 +227,11 @@ export interface Database {
           lesson_duration_minutes?: number;
           status?: BookingStatus;
           meeting_link?: string | null;
+          meeting_provider?: string | null;
+          meeting_url?: string | null;
+          meeting_id?: string | null;
+          calendar_event_id?: string | null;
+          meeting_status?: string;
           price_cents: number;
           platform_fee_cents: number;
           currency?: string;
@@ -312,8 +324,43 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["admin_actions"]["Insert"]>;
         Relationships: [];
       };
+      notifications: {
+        Row: {
+          id: string;
+          user_id: string;
+          type: string;
+          category: string;
+          title: string;
+          body: string | null;
+          data: Json;
+          read_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          type: string;
+          category?: string;
+          title: string;
+          body?: string | null;
+          data?: Json;
+          read_at?: string | null;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["notifications"]["Insert"]>;
+        Relationships: [];
+      };
     };
-    Views: Record<string, never>;
+    Views: {
+      review_authors: {
+        Row: {
+          id: string;
+          full_name: string;
+          avatar_url: string | null;
+        };
+        Relationships: [];
+      };
+    };
     Functions: Record<string, never>;
     Enums: {
       user_role: UserRole;
