@@ -6,8 +6,8 @@ import { TextField } from "@/components/ui/TextField";
 import { TextArea } from "@/components/ui/TextArea";
 import { SelectField } from "@/components/ui/SelectField";
 import { CheckboxGroup } from "@/components/ui/CheckboxGroup";
-import { COUNTRIES } from "@/lib/constants/countries";
-import { LANGUAGES } from "@/lib/constants/languages";
+import { COUNTRY_SELECT_OPTIONS } from "@/lib/constants/countries";
+import { LANGUAGE_NAMES, LANGUAGE_SELECT_OPTIONS } from "@/lib/constants/languages";
 import { ENGLISH_LEVEL_LABELS } from "@/lib/constants/profile-options";
 import type { Profile, StudentProfile } from "@/types/database";
 
@@ -37,7 +37,7 @@ export function StudentProfileForm({
         <SelectField
           label="Country"
           name="country"
-          options={COUNTRIES}
+          options={COUNTRY_SELECT_OPTIONS}
           defaultValue={profile.country}
         />
         <SelectField
@@ -53,7 +53,7 @@ export function StudentProfileForm({
         <SelectField
           label="Native language"
           name="nativeLanguage"
-          options={LANGUAGES}
+          options={LANGUAGE_SELECT_OPTIONS}
           defaultValue={studentProfile?.native_language ?? null}
         />
         <SelectField
@@ -67,7 +67,7 @@ export function StudentProfileForm({
       <CheckboxGroup
         label="Target language(s) — what you want to learn"
         name="targetLanguages"
-        options={LANGUAGES}
+        options={LANGUAGE_NAMES}
         defaultValues={studentProfile?.target_languages}
       />
 

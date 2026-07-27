@@ -6,8 +6,8 @@ import { TextField } from "@/components/ui/TextField";
 import { TextArea } from "@/components/ui/TextArea";
 import { SelectField } from "@/components/ui/SelectField";
 import { CheckboxGroup } from "@/components/ui/CheckboxGroup";
-import { COUNTRIES } from "@/lib/constants/countries";
-import { LANGUAGES } from "@/lib/constants/languages";
+import { COUNTRY_SELECT_OPTIONS } from "@/lib/constants/countries";
+import { LANGUAGE_NAMES } from "@/lib/constants/languages";
 import { SPECIALIZATIONS } from "@/lib/constants/profile-options";
 import type { Profile, Subject, TutorProfile } from "@/types/database";
 
@@ -65,7 +65,7 @@ export function TutorProfileForm({
         <SelectField
           label="Country"
           name="country"
-          options={COUNTRIES}
+          options={COUNTRY_SELECT_OPTIONS}
           defaultValue={profile.country}
         />
         <SelectField
@@ -80,14 +80,14 @@ export function TutorProfileForm({
       <CheckboxGroup
         label="Languages you speak"
         name="languagesSpoken"
-        options={LANGUAGES}
+        options={LANGUAGE_NAMES}
         defaultValues={tutorProfile?.languages_spoken}
       />
 
       <CheckboxGroup
         label="Languages you teach"
         name="teachingLanguages"
-        options={LANGUAGES}
+        options={LANGUAGE_NAMES}
         defaultValues={tutorProfile?.teaching_languages}
       />
 

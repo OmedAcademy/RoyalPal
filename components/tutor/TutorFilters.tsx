@@ -1,6 +1,6 @@
 import { SelectField } from "@/components/ui/SelectField";
 import { TextField } from "@/components/ui/TextField";
-import { LANGUAGES } from "@/lib/constants/languages";
+import { LANGUAGE_SELECT_OPTIONS } from "@/lib/constants/languages";
 import type { Subject } from "@/types/database";
 
 export function TutorFilters({
@@ -26,7 +26,7 @@ export function TutorFilters({
       <SelectField
         label="Teaches in"
         name="language"
-        options={LANGUAGES}
+        options={LANGUAGE_SELECT_OPTIONS}
         defaultValue={defaultLanguage}
         placeholder="Any language"
       />
