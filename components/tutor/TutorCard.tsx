@@ -1,10 +1,7 @@
 import Link from "next/link";
 import type { TutorSearchResult } from "@/lib/supabase/tutor-search";
 import type { Subject } from "@/types/database";
-
-function priceLabel(cents: number, currency: string): string {
-  return `${(cents / 100).toLocaleString(undefined, { style: "currency", currency: currency.toUpperCase() })}/hr`;
-}
+import { formatMoney } from "@/lib/utils/format";
 
 export function TutorCard({
   tutor,
@@ -21,10 +18,10 @@ export function TutorCard({
   return (
     <Link
       href={`/student/tutors/${tutor.id}`}
-      className="flex flex-col gap-3 rounded-md border border-black/10 p-4 transition hover:border-black/30 dark:border-white/10 dark:hover:border-white/30"
+      className="shadow-luxe border-hairline bg-surface hover:border-royal flex flex-col gap-3 rounded-2xl border p-4 transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-0.5"
     >
       <div className="flex items-center gap-3">
-        <div className="h-14 w-14 shrink-0 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
+        <div className="h-14 w-14 shrink-0 overflow-hidden rounded-full bg-[color:var(--hairline)]">
           {tutor.avatar_url ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -33,14 +30,14 @@ export function TutorCard({
               className="h-full w-full object-cover"
             />
           ) : (
-            <span className="flex h-full w-full items-center justify-center text-lg font-semibold text-zinc-500">
+            <span className="text-muted flex h-full w-full items-center justify-center text-lg font-semibold">
               {initial}
             </span>
           )}
         </div>
-        <div>
-          <p className="font-medium">{tutor.full_name}</p>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">{tutor.headline}</p>
+        <div className="min-w-0">
+          <p className="truncate font-medium">{tutor.full_name}</p>
+          <p className="text-muted truncate text-sm">{tutor.headline}</p>
         </div>
       </div>
 
@@ -49,7 +46,7 @@ export function TutorCard({
           {subjectNames.map((name) => (
             <span
               key={name}
-              className="rounded-full bg-black/5 px-2 py-0.5 text-xs text-zinc-700 dark:bg-white/10 dark:text-zinc-300"
+              className="text-muted-strong rounded-full bg-[color:var(--hairline)] px-2 py-0.5 text-xs"
             >
               {name}
             </span>
@@ -58,13 +55,17 @@ export function TutorCard({
       )}
 
       <div className="flex items-center justify-between text-sm">
-        <span className="font-medium">{priceLabel(tutor.hourly_rate_cents, tutor.currency)}</span>
+        <span className="font-medium">
+          {formatMoney(tutor.hourly_rate_cents, tutor.currency)}
+          <span className="text-muted">/hr</span>
+        </span>
         {tutor.avg_rating !== null ? (
-          <span className="text-zinc-600 dark:text-zinc-400">
-            ★ {tutor.avg_rating.toFixed(1)} ({tutor.total_reviews})
+          <span className="text-muted">
+            <span className="text-amber-500">★</span> {tutor.avg_rating.toFixed(1)} (
+            {tutor.total_reviews})
           </span>
         ) : (
-          <span className="text-zinc-500 dark:text-zinc-500">No reviews yet</span>
+          <span className="text-muted">No reviews yet</span>
         )}
       </div>
     </Link>

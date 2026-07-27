@@ -1,26 +1,177 @@
 @import "tailwindcss";
 
+/* Dark styling is opt-in via a `.dark` class rather than the OS setting, so
+ * the warm ivory palette is the definitive brand expression and never gets
+ * overridden to an all-black theme by a viewer's system preference. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * RoyalPal design tokens — "quiet luxury".
+ * A warm ivory canvas, deep royal-blue ink, soft platinum hairlines, and
+ * rich gold reserved for the smallest, most deliberate accents. Gold used
+ * as text is the darker `--gold` (AA-legible); the brighter `--gold-rich`
+ * is decorative only (dividers, the metallic headline, the crown).
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
+
+  --background: #f8f5ee; /* warm ivory */
+  --surface: #fffdf8; /* warm white (cards) */
+  --surface-raised: #ffffff;
+  --foreground: #12233d; /* deep royal ink */
+  --muted: #5b6472; /* secondary text (AA on ivory) */
+  --muted-strong: #3a4456;
+  --royal: #0f2d52; /* royal blue (primary) */
+  --royal-hover: #0b2340;
+  --royal-contrast: #fdfcf8; /* text on royal */
+  --gold: #8a6a1e; /* AA-legible gold for small text accents */
+  --gold-rich: #d4af37; /* decorative rich gold */
+  --gold-soft: #c8a94e; /* the crown glyph */
+  --platinum: #e5e4e2;
+  --hairline: rgba(15, 45, 82, 0.12);
+  --hairline-strong: rgba(15, 45, 82, 0.2);
+  --ring: rgba(15, 45, 82, 0.5);
+  --shadow-color: 214 45% 22%;
+}
+
+.dark {
+  color-scheme: dark;
+
+  --background: #0b1a2e; /* deep royal navy — never pure black */
+  --surface: #10233c;
+  --surface-raised: #16294a;
+  --foreground: #eff0ea; /* warm platinum */
+  --muted: #a3adbe;
+  --muted-strong: #c7cedb;
+  --royal: #5f86d0;
+  --royal-hover: #7699db;
+  --royal-contrast: #0a1526;
+  --gold: #d9bd6e;
+  --gold-rich: #e6ca70;
+  --gold-soft: #c8a94e;
+  --platinum: #2a3550;
+  --hairline: rgba(255, 255, 255, 0.1);
+  --hairline-strong: rgba(255, 255, 255, 0.18);
+  --ring: rgba(140, 168, 232, 0.6);
+  --shadow-color: 220 60% 3%;
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
   --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-strong: var(--muted-strong);
+  --color-royal: var(--royal);
+  --color-royal-hover: var(--royal-hover);
+  --color-royal-contrast: var(--royal-contrast);
+  --color-gold: var(--gold);
+  --color-gold-rich: var(--gold-rich);
+  --color-gold-soft: var(--gold-soft);
+  --color-platinum: var(--platinum);
+  --color-hairline: var(--hairline);
+  --color-hairline-strong: var(--hairline-strong);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+body {
+  /* Warm ivory with an almost-imperceptible paper grain baked into the
+   * tiled SVG (no runtime cost, no extra request). */
+  background-color: var(--background);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Editorial display face for hero + section headings. */
+.font-display {
+  font-family: var(--font-display), Georgia, "Times New Roman", serif;
+  font-feature-settings:
+    "liga" 1,
+    "dlig" 1;
+}
+
+/* Rich-gold metallic headline. Darker stops at the ends keep it legible;
+ * the light centre stop provides the foil sheen. */
+.text-gold-foil {
+  background: linear-gradient(
+    94deg,
+    #7a5b17 0%,
+    #b8912e 22%,
+    #e9d38a 50%,
+    #b8912e 78%,
+    #7a5b17 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--royal) 18%, transparent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Restrained elevation — soft and cool, never heavy. */
+@utility shadow-luxe {
+  box-shadow:
+    0 1px 2px hsl(var(--shadow-color) / 0.05),
+    0 10px 30px -18px hsl(var(--shadow-color) / 0.16);
+}
+@utility shadow-luxe-lg {
+  box-shadow:
+    0 1px 2px hsl(var(--shadow-color) / 0.05),
+    0 18px 44px -20px hsl(var(--shadow-color) / 0.2);
+}
+
+/* Subtle entrance — a gentle rise + fade, disabled for reduced motion. */
+@keyframes rp-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+.rp-rise {
+  animation: rp-rise 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.rp-rise-1 {
+  animation-delay: 0.05s;
+}
+.rp-rise-2 {
+  animation-delay: 0.15s;
+}
+.rp-rise-3 {
+  animation-delay: 0.25s;
+}
+.rp-rise-4 {
+  animation-delay: 0.35s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.001ms !important;
+  }
+  .rp-rise {
+    opacity: 1;
+    transform: none;
+  }
 }
