@@ -2,14 +2,30 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
-    branches: [main]
+
+# Cancel superseded runs on the same ref — saves minutes on rapid pushes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   verify:
-    name: Lint, typecheck, and build
+    name: Format, lint, typecheck, test, build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # `next build` evaluates route modules while collecting page data, so the
+    # public env vars must exist for the build to be deterministic. These are
+    # syntactically valid placeholders — CI makes no network calls and no real
+    # secret is needed to prove the app compiles.
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key
+      SUPABASE_SERVICE_ROLE_KEY: placeholder-service-role-key
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -31,6 +47,20 @@ jobs:
 
       - name: Typecheck
         run: npm run typecheck
+
+      # Booking correctness is timezone-sensitive, and a host-timezone-dependent
+      # bug already shipped once (offsets were measured by re-parsing localized
+      # strings in the host zone). Running the suite under two zones keeps that
+      # class of regression from returning unnoticed.
+      - name: Test (TZ=UTC)
+        run: npm run test
+        env:
+          TZ: UTC
+
+      - name: Test (TZ=America/New_York)
+        run: npm run test
+        env:
+          TZ: America/New_York
 
       - name: Build
         run: npm run build
