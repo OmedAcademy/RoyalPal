@@ -3,12 +3,22 @@ import Link from "next/link";
 import { requireProfile } from "@/lib/supabase/queries";
 import { createClient } from "@/lib/supabase/server";
 import { getTutorById } from "@/lib/supabase/tutor-search";
+import { getTutorReviews } from "@/lib/supabase/reviews";
+import { safeExternalUrl } from "@/lib/utils/url";
 
 function priceLabel(cents: number, currency: string): string {
   return (cents / 100).toLocaleString(undefined, {
     style: "currency",
     currency: currency.toUpperCase(),
   });
+}
+
+/** "Maria Lopez" -> "Maria L." — public review lists shouldn't broadcast a
+ * student's full surname. */
+function reviewerLabel(fullName: string): string {
+  const [first, ...rest] = fullName.trim().split(/\s+/);
+  const lastInitial = rest.length > 0 ? ` ${rest[rest.length - 1].charAt(0).toUpperCase()}.` : "";
+  return `${first}${lastInitial}`;
 }
 
 export default async function TutorDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -21,9 +31,12 @@ export default async function TutorDetailPage({ params }: { params: Promise<{ id
   }
 
   const supabase = await createClient();
-  const { data: subjects } = tutor.subject_ids.length
-    ? await supabase.from("subjects").select("*").in("id", tutor.subject_ids)
-    : { data: [] };
+  const [{ data: subjects }, reviews] = await Promise.all([
+    tutor.subject_ids.length
+      ? supabase.from("subjects").select("*").in("id", tutor.subject_ids)
+      : Promise.resolve({ data: [] }),
+    getTutorReviews(id),
+  ]);
 
   const initial = tutor.full_name.trim().charAt(0).toUpperCase() || "?";
 
@@ -110,9 +123,11 @@ export default async function TutorDetailPage({ params }: { params: Promise<{ id
         <p className="text-sm whitespace-pre-wrap text-zinc-600 dark:text-zinc-400">{tutor.bio}</p>
       </div>
 
-      {tutor.video_url && (
+      {/* Re-validated at render: rows saved before scheme validation existed
+          may still hold a `javascript:` URL, and this is a public page. */}
+      {safeExternalUrl(tutor.video_url) && (
         <a
-          href={tutor.video_url}
+          href={safeExternalUrl(tutor.video_url)!}
           target="_blank"
           rel="noreferrer"
           className="w-fit text-sm font-medium underline underline-offset-2"
@@ -127,6 +142,52 @@ export default async function TutorDetailPage({ params }: { params: Promise<{ id
       >
         Book a lesson
       </Link>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-sm font-medium">
+          Reviews{" "}
+          {tutor.avg_rating !== null && (
+            <span className="font-normal text-zinc-500 dark:text-zinc-400">
+              · ★ {tutor.avg_rating.toFixed(1)} ({tutor.total_reviews})
+            </span>
+          )}
+        </h2>
+        {reviews.length === 0 ? (
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            No reviews yet — be the first after your lesson.
+          </p>
+        ) : (
+          reviews.map((review) => (
+            <div
+              key={review.id}
+              className="flex flex-col gap-1 rounded-md border border-black/10 p-3 dark:border-white/10"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  aria-label={`${review.rating} out of 5 stars`}
+                  className="text-sm text-amber-500"
+                >
+                  {"★".repeat(review.rating)}
+                  <span className="text-zinc-300 dark:text-zinc-600">
+                    {"★".repeat(5 - review.rating)}
+                  </span>
+                </span>
+                <span className="text-sm font-medium">{reviewerLabel(review.author_name)}</span>
+                <span className="text-xs text-zinc-500">
+                  {new Intl.DateTimeFormat("en-US", { month: "short", year: "numeric" }).format(
+                    new Date(review.created_at),
+                  )}
+                </span>
+              </div>
+              {review.comment && (
+                <p className="text-sm whitespace-pre-wrap text-zinc-600 dark:text-zinc-400">
+                  {review.comment}
+                </p>
+              )}
+            </div>
+          ))
+        )}
+      </section>
     </div>
   );
 }
