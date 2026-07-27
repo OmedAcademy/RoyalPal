@@ -1,29 +1,10 @@
 import type { BookingWithParties } from "@/lib/supabase/bookings";
 import { CancelBookingButton } from "@/components/booking/CancelBookingButton";
 import { RetryPaymentButton } from "@/components/booking/RetryPaymentButton";
-
-const STATUS_LABELS: Record<BookingWithParties["status"], string> = {
-  pending_payment: "Pending payment",
-  confirmed: "Confirmed",
-  completed: "Completed",
-  cancelled: "Cancelled",
-  refunded: "Refunded",
-};
-
-const STATUS_STYLES: Record<BookingWithParties["status"], string> = {
-  pending_payment: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
-  confirmed: "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300",
-  completed: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300",
-  cancelled: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300",
-  refunded: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300",
-};
-
-function priceLabel(cents: number, currency: string): string {
-  return (cents / 100).toLocaleString(undefined, {
-    style: "currency",
-    currency: currency.toUpperCase(),
-  });
-}
+import { ReviewForm } from "@/components/review/ReviewForm";
+import { BOOKING_STATUS_LABELS, BOOKING_STATUS_STYLES } from "@/lib/utils/booking-status";
+import { formatMoney } from "@/lib/utils/format";
+import { safeExternalUrl } from "@/lib/utils/url";
 
 export function BookingCard({
   booking,
@@ -43,6 +24,19 @@ export function BookingCard({
   // re-validates everything server-side).
   const canRetryPayment =
     viewerRole === "student" && booking.status === "pending_payment" && isUpcoming;
+  const canReview = viewerRole === "student" && booking.status === "completed" && !booking.reviewed;
+
+  // Join window: 15 minutes before start until the lesson's end. Outside it
+  // the link is hidden to avoid people joining an empty room days ahead.
+  const startMs = new Date(booking.start_at).getTime();
+  const endMs = new Date(booking.end_at).getTime();
+  const now = Date.now();
+  const withinJoinWindow = now >= startMs - 15 * 60_000 && now <= endMs;
+  const isLive = now >= startMs && now <= endMs;
+  const joinUrl =
+    booking.status === "confirmed" && withinJoinWindow
+      ? safeExternalUrl(booking.meeting_url)
+      : null;
 
   const formatter = new Intl.DateTimeFormat("en-US", {
     timeZone: viewerTimezone,
@@ -54,31 +48,53 @@ export function BookingCard({
   });
 
   return (
-    <div className="flex flex-col gap-2 rounded-md border border-black/10 p-4 dark:border-white/10">
+    <div className="shadow-luxe border-hairline bg-surface flex flex-col gap-2 rounded-2xl border p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="font-medium">
             {booking.subject_name} with {otherPartyName}
           </p>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            {formatter.format(new Date(booking.start_at))}
-          </p>
+          <p className="text-muted text-sm">{formatter.format(new Date(booking.start_at))}</p>
         </div>
         <span
-          className={`w-fit rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_STYLES[booking.status]}`}
+          className={`w-fit rounded-full px-2.5 py-1 text-xs font-medium ${BOOKING_STATUS_STYLES[booking.status]}`}
         >
-          {STATUS_LABELS[booking.status]}
+          {BOOKING_STATUS_LABELS[booking.status]}
         </span>
       </div>
 
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">
+      <p className="text-muted text-sm">
         {booking.lesson_duration_minutes} min &middot;{" "}
-        {priceLabel(booking.price_cents, booking.currency)}
+        {formatMoney(booking.price_cents, booking.currency)}
       </p>
 
       {booking.cancellation_reason && (
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">
-          Reason: {booking.cancellation_reason}
+        <p className="text-muted text-sm">Reason: {booking.cancellation_reason}</p>
+      )}
+
+      {/* The live classroom. Both parties see the SAME Meet URL (one calendar
+          event, two attendees). Shown from 15 minutes before the start until
+          the lesson ends, so the link doesn't invite people to join days
+          early. safeExternalUrl re-validates the scheme because this value
+          reaches an href. */}
+      {joinUrl && (
+        <a
+          href={joinUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="bg-royal text-royal-contrast shadow-luxe mt-1 inline-flex h-10 w-fit items-center gap-2 rounded-full px-4 text-sm font-medium transition-transform hover:-translate-y-0.5"
+        >
+          <span aria-hidden="true">🎥</span>
+          {isLive ? "Join lesson now" : "Join lesson"}
+        </a>
+      )}
+
+      {/* Meeting creation failed (e.g. Google outage). The lesson is still
+          confirmed and paid — say so plainly rather than silently showing
+          nothing, and reassure that a link is coming. */}
+      {booking.status === "confirmed" && booking.meeting_status === "failed" && (
+        <p className="text-muted text-sm">
+          We&apos;re still preparing your video link — it will appear here shortly.
         </p>
       )}
 
@@ -88,6 +104,8 @@ export function BookingCard({
           {canCancel && <CancelBookingButton bookingId={booking.id} />}
         </div>
       )}
+
+      {canReview && <ReviewForm bookingId={booking.id} tutorName={booking.tutor_name} />}
     </div>
   );
 }

@@ -22,7 +22,13 @@ export type TutorSearchFilters = {
   subjectId?: number;
   language?: string;
   maxPrice?: number;
+  /** Hard cap on rows returned. Always bounded so a growing tutor base can
+   * never turn a listing into an unbounded scan. */
+  limit?: number;
 };
+
+/** Safety ceiling applied when a caller doesn't specify one. */
+const DEFAULT_SEARCH_LIMIT = 60;
 
 type RawTutorRow = {
   id: string;
@@ -92,7 +98,8 @@ export async function searchTutors(filters: TutorSearchFilters): Promise<TutorSe
     .select(TUTOR_SELECT)
     .eq("verification_status", "approved")
     .order("avg_rating", { ascending: false, nullsFirst: false })
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(filters.limit ?? DEFAULT_SEARCH_LIMIT);
 
   if (tutorIds) {
     query = query.in("id", tutorIds);
@@ -107,6 +114,24 @@ export async function searchTutors(filters: TutorSearchFilters): Promise<TutorSe
   const { data, error } = await query.returns<RawTutorRow[]>();
   if (error) throw error;
 
+  return (data ?? []).map(normalizeTutorRow);
+}
+
+/** Loads specific approved tutors by id (order not guaranteed). Used by the
+ * student dashboard's favourites list. Respects the same approved-only
+ * visibility as search. */
+export async function getTutorsByIds(ids: string[]): Promise<TutorSearchResult[]> {
+  if (ids.length === 0) return [];
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("tutor_profiles")
+    .select(TUTOR_SELECT)
+    .eq("verification_status", "approved")
+    .in("id", ids)
+    .returns<RawTutorRow[]>();
+
+  if (error) throw error;
   return (data ?? []).map(normalizeTutorRow);
 }
 
