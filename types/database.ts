@@ -350,6 +350,24 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["notifications"]["Insert"]>;
         Relationships: [];
       };
+      stripe_events: {
+        Row: {
+          id: string;
+          type: string;
+          payload: Json;
+          processed_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id: string;
+          type: string;
+          payload: Json;
+          processed_at?: string | null;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["stripe_events"]["Insert"]>;
+        Relationships: [];
+      };
     };
     Views: {
       review_authors: {
@@ -382,3 +400,4 @@ export type AvailabilityException = Database["public"]["Tables"]["availability_e
 export type Booking = Database["public"]["Tables"]["bookings"]["Row"];
 export type Payment = Database["public"]["Tables"]["payments"]["Row"];
 export type Review = Database["public"]["Tables"]["reviews"]["Row"];
+export type StripeEvent = Database["public"]["Tables"]["stripe_events"]["Row"];
