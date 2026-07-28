@@ -20,6 +20,19 @@ const eslintConfig = [
     // reporting, top-level await — that the app config flags as noise.
     ignores: [".next/**", "out/**", "build/**", "next-env.d.ts", "scripts/**"],
   },
+  {
+    rules: {
+      // React's useActionState requires action functions to accept
+      // (previousState, formData) positionally even when a given action
+      // needs neither (e.g. it only acts on the caller's own session) —
+      // underscore-prefixed params mark that as intentional rather than
+      // dead code.
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+      ],
+    },
+  },
 ];
 
 export default eslintConfig;

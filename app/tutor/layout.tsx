@@ -30,6 +30,9 @@ export default async function TutorLayout({ children }: { children: React.ReactN
           <Link href="/tutor/profile" className="text-sm font-medium">
             Profile
           </Link>
+          <Link href="/tutor/payouts" className="text-sm font-medium">
+            Payouts
+          </Link>
           <NotificationCenter notifications={notifications} unreadCount={unreadCount} />
           <SignOutButton />
         </nav>
