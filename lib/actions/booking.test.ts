@@ -231,6 +231,28 @@ describe("createBooking — concurrency and failure handling", () => {
   });
 });
 
+describe("createBooking — Connect destination-charge plumbing", () => {
+  it("passes the server-derived platform fee and the tutor's connected account to Checkout", async () => {
+    fake.db.tutor_profiles[0].stripe_account_id = "acct_tutor_1";
+
+    await captureRedirect(() => createBooking({}, form()));
+
+    const args = createCheckout.mock.calls[0][0];
+    expect(args.platformFeeCents).toBe(750);
+    expect(args.tutorStripeAccountId).toBe("acct_tutor_1");
+  });
+
+  it("passes null when the tutor hasn't connected a Stripe account yet", async () => {
+    // Destination-charge routing is additive, not a booking gate: an
+    // unconnected tutor can still be booked today, Checkout just falls
+    // back to a plain platform charge until they onboard.
+    await captureRedirect(() => createBooking({}, form()));
+
+    const args = createCheckout.mock.calls[0][0];
+    expect(args.tutorStripeAccountId).toBeNull();
+  });
+});
+
 describe("cancelBooking", () => {
   beforeEach(() => {
     fake.db.bookings.push({

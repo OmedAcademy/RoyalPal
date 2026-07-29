@@ -34,6 +34,8 @@ const params = {
   currency: "usd",
   subjectName: "English",
   tutorName: "Ada",
+  platformFeeCents: 750,
+  tutorStripeAccountId: null as string | null,
 };
 
 const args = () => create.mock.calls[0][0];
@@ -106,5 +108,40 @@ describe("product handling in the shared account", () => {
     expect(price.unit_amount).toBe(1234);
     expect(price.currency).toBe("eur");
     expect(args().line_items[0].price).toBeUndefined();
+  });
+});
+
+describe("Connect destination charges", () => {
+  it("sets application_fee_amount and transfer_data.destination when the tutor has a connected account", async () => {
+    await createBookingCheckoutSession({
+      ...params,
+      platformFeeCents: 750,
+      tutorStripeAccountId: "acct_tutor_1",
+    });
+
+    expect(args().payment_intent_data.application_fee_amount).toBe(750);
+    expect(args().payment_intent_data.transfer_data).toEqual({ destination: "acct_tutor_1" });
+  });
+
+  it("omits application_fee_amount and transfer_data entirely when the tutor has no connected account yet", async () => {
+    await createBookingCheckoutSession({ ...params, tutorStripeAccountId: null });
+
+    expect(args().payment_intent_data.application_fee_amount).toBeUndefined();
+    expect(args().payment_intent_data.transfer_data).toBeUndefined();
+    // Falls back to a plain platform charge — booking_id metadata is
+    // untouched either way.
+    expect(args().payment_intent_data.metadata.booking_id).toBe(BOOKING);
+  });
+
+  it("never derives the fee amount from anything but the server-computed platformFeeCents", async () => {
+    await createBookingCheckoutSession({
+      ...params,
+      priceCents: 9999,
+      platformFeeCents: 1500,
+      tutorStripeAccountId: "acct_tutor_1",
+    });
+
+    expect(args().payment_intent_data.application_fee_amount).toBe(1500);
+    expect(args().line_items[0].price_data.unit_amount).toBe(9999);
   });
 });

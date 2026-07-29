@@ -41,14 +41,20 @@ async function startCheckout(
     subject_id: number;
     lesson_duration_minutes: number;
     price_cents: number;
+    platform_fee_cents: number;
     currency: string;
   },
 ): Promise<string> {
   const lessonType = booking.lesson_duration_minutes === 30 ? "trial" : "standard";
 
-  const [{ data: subject }, { data: tutor }] = await Promise.all([
+  const [{ data: subject }, { data: tutor }, { data: tutorProfile }] = await Promise.all([
     supabase.from("subjects").select("name").eq("id", booking.subject_id).single(),
     supabase.from("profiles").select("full_name").eq("id", booking.tutor_id).single(),
+    supabase
+      .from("tutor_profiles")
+      .select("stripe_account_id")
+      .eq("id", booking.tutor_id)
+      .maybeSingle(),
   ]);
 
   const session = await createBookingCheckoutSession({
@@ -62,6 +68,8 @@ async function startCheckout(
     currency: booking.currency,
     subjectName: subject?.name ?? "Lesson",
     tutorName: tutor?.full_name ?? "your tutor",
+    platformFeeCents: booking.platform_fee_cents,
+    tutorStripeAccountId: tutorProfile?.stripe_account_id ?? null,
   });
 
   if (!session.url) {
@@ -211,7 +219,9 @@ export async function createBooking(
       platform_fee_cents: platformFeeCents,
       currency: tutorProfile.currency,
     })
-    .select("id, tutor_id, student_id, subject_id, lesson_duration_minutes, price_cents, currency")
+    .select(
+      "id, tutor_id, student_id, subject_id, lesson_duration_minutes, price_cents, platform_fee_cents, currency",
+    )
     .single();
 
   if (insertError) {
@@ -280,7 +290,7 @@ export async function retryBookingPayment(
   const { data: booking } = await supabase
     .from("bookings")
     .select(
-      "id, tutor_id, student_id, subject_id, lesson_duration_minutes, price_cents, currency, status",
+      "id, tutor_id, student_id, subject_id, lesson_duration_minutes, price_cents, platform_fee_cents, currency, status",
     )
     .eq("id", bookingId)
     .eq("student_id", user.id)

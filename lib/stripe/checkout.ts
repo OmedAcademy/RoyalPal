@@ -79,6 +79,15 @@ export async function createBookingCheckoutSession(params: {
   currency: string;
   subjectName: string;
   tutorName: string;
+  /** RoyalPal's cut of priceCents, in cents. Always server-derived (see
+   * lib/actions/booking.ts) — never accept this from client input. */
+  platformFeeCents: number;
+  /** The tutor's Connect Express account id (tutor_profiles.stripe_account_id),
+   * or null if they haven't completed onboarding yet. Sourced exclusively
+   * from our own database, keyed by the booking's own tutor_id — never from
+   * anything client-supplied — so a destination charge can only ever route
+   * to the account WE already associate with this specific tutor. */
+  tutorStripeAccountId: string | null;
 }) {
   const metadata: BookingCheckoutMetadata = {
     booking_id: params.bookingId,
@@ -115,7 +124,23 @@ export async function createBookingCheckoutSession(params: {
     // The PaymentIntent copy is also what makes revenue reporting filterable
     // by app in the account shared with Lingora.
     metadata,
-    payment_intent_data: { metadata },
+    payment_intent_data: {
+      metadata,
+      // Destination charge (locked architecture): Stripe transfers
+      // priceCents - platformFeeCents to the tutor's connected account
+      // automatically on capture. Omitted entirely — falling back to a
+      // plain platform charge, today's pre-Connect behavior — when the
+      // tutor hasn't completed onboarding yet. This is deliberately NOT a
+      // booking-eligibility gate; it only decides how a charge that's
+      // already happening gets split. Whether an unconnected tutor should
+      // be bookable at all is a separate, later decision.
+      ...(params.tutorStripeAccountId
+        ? {
+            application_fee_amount: params.platformFeeCents,
+            transfer_data: { destination: params.tutorStripeAccountId },
+          }
+        : {}),
+    },
     expires_at: Math.floor(Date.now() / 1000) + CHECKOUT_SESSION_LIFETIME_SECONDS,
     success_url: `${appUrl}/student/bookings?payment=success`,
     cancel_url: `${appUrl}/api/stripe/checkout-cancelled?booking_id=${params.bookingId}`,
