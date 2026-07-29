@@ -4,10 +4,13 @@ import type Stripe from "stripe";
 import { getStripe } from "@/lib/stripe/client";
 import { logger, newRequestId } from "@/lib/observability/logger";
 import {
+  handleAccountUpdated,
   handleCheckoutSessionCompleted,
   handleCheckoutSessionExpired,
   handlePaymentIntentFailed,
   handlePaymentIntentSucceeded,
+  markEventProcessed,
+  shouldProcessEvent,
 } from "@/lib/stripe/webhook-handlers";
 
 /**
@@ -61,6 +64,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const startedAt = Date.now();
 
+  // Idempotency gate: covers every event type uniformly (not just the ones
+  // with their own unique-constraint backstop), so it must run before ANY
+  // handler dispatch. See shouldProcessEvent's doc comment for the
+  // exists-but-unprocessed vs. already-processed distinction.
+  if (!(await shouldProcessEvent(event))) {
+    return NextResponse.json({ received: true, duplicate: true });
+  }
+
   try {
     switch (event.type) {
       case "checkout.session.completed":
@@ -75,6 +86,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       case "payment_intent.payment_failed":
         await handlePaymentIntentFailed(event.data.object);
         break;
+      case "account.updated":
+        await handleAccountUpdated(event.data.object);
+        break;
       default:
         // Unhandled event types are expected — Stripe sends far more event
         // types than this integration acts on. Acknowledge with 200 so
@@ -84,12 +98,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
   } catch (err) {
     // A thrown error (vs. a handled/logged one inside the handler) means
-    // something unexpected broke — return 500 so Stripe retries delivery
-    // instead of silently losing the event.
+    // something unexpected broke — return 500 so Stripe retries delivery.
+    // processed_at is deliberately left unset: shouldProcessEvent will let
+    // the retry reprocess rather than skip it as a duplicate.
     log.error("unhandled error processing event", err, { durationMs: Date.now() - startedAt });
     return NextResponse.json({ error: "Webhook handler failed" }, { status: 500 });
   }
 
+  await markEventProcessed(event.id);
   log.info("event processed", { durationMs: Date.now() - startedAt });
   return NextResponse.json({ received: true });
 }

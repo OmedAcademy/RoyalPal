@@ -5,7 +5,7 @@ import { NotificationService } from "@/lib/notifications/service";
 import { isRoyalPalMetadata } from "@/lib/stripe/app-metadata";
 import { MeetingService } from "@/lib/meet/service";
 import { logger } from "@/lib/observability/logger";
-import type { Database } from "@/types/database";
+import type { Database, Json } from "@/types/database";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -28,6 +28,69 @@ const log = logger.child({ component: "stripe-webhook" });
  * Requiring `app === "royalpal"` makes ownership explicit and fails closed:
  * untagged or unknown-app events are ignored.
  */
+/**
+ * Idempotency gate for the whole webhook route (called once per delivery,
+ * before any event-type-specific handler runs).
+ *
+ * The payment handlers already have their own idempotency via unique
+ * constraints and conditional updates on `payments`/`bookings`, but Connect
+ * event types (account.updated, transfer.*, payout.*) have no natural
+ * unique-constraint backstop of their own — this is that backstop,
+ * generalized to every event type rather than reimplemented per handler.
+ *
+ * A row with `processed_at` already set means a *fully completed* prior
+ * delivery — skip. A row that exists with `processed_at` still null means a
+ * prior attempt was recorded but never finished (the process crashed, or the
+ * handler threw) — reprocess rather than skip, since nothing actually
+ * completed. Ledger write failures fail OPEN (log and still process): this
+ * table is a defense-in-depth idempotency aid, not the source of truth, and
+ * refusing to process a real payment/account event because a bookkeeping
+ * insert failed would be the wrong trade-off.
+ */
+export async function shouldProcessEvent(event: Stripe.Event): Promise<boolean> {
+  const admin = createAdminClient();
+
+  const { data: existing } = await admin
+    .from("stripe_events")
+    .select("processed_at")
+    .eq("id", event.id)
+    .maybeSingle();
+
+  if (existing?.processed_at) {
+    log.info("duplicate event skipped", { stripeEventId: event.id, eventType: event.type });
+    return false;
+  }
+
+  if (!existing) {
+    const { error } = await admin.from("stripe_events").insert({
+      id: event.id,
+      type: event.type,
+      payload: event as unknown as Json,
+    });
+    if (error) {
+      log.error("failed to record stripe event", error, {
+        stripeEventId: event.id,
+        eventType: event.type,
+      });
+    }
+  }
+
+  return true;
+}
+
+/** Marks an event fully processed so a later duplicate delivery is skipped. */
+export async function markEventProcessed(eventId: string): Promise<void> {
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from("stripe_events")
+    .update({ processed_at: new Date().toISOString() })
+    .eq("id", eventId);
+
+  if (error) {
+    log.error("failed to mark stripe event processed", error, { stripeEventId: eventId });
+  }
+}
+
 function bookingIdFromMetadata(metadata: Stripe.Metadata | null | undefined): string | null {
   if (!isRoyalPalMetadata(metadata)) return null;
   return metadata?.booking_id ?? null;
@@ -284,6 +347,72 @@ export async function handleCheckoutSessionExpired(
     log.error("failed to cancel expired booking", cancelError, {
       bookingId,
       sessionId: session.id,
+    });
+  }
+}
+
+/**
+ * Syncs tutor_profiles.stripe_charges_enabled from the connected Account's
+ * actual Stripe-verified state. This is the ONLY thing that flips it —
+ * onboarding's return_url redirect is not trusted for this, since a tutor
+ * can land back on /tutor/payouts before Stripe has finished verifying
+ * anything (or after abandoning onboarding entirely).
+ *
+ * Looked up by stripe_account_id rather than trusting metadata.tutor_id
+ * alone: the account is looked up in our own table, so a mismatched or
+ * stale metadata value can't retarget the write to the wrong row.
+ */
+export async function handleAccountUpdated(account: Stripe.Account): Promise<void> {
+  if (!isRoyalPalMetadata(account.metadata)) return;
+
+  const admin = createAdminClient();
+  const { data: tutorProfile, error: lookupError } = await admin
+    .from("tutor_profiles")
+    .select("id, stripe_charges_enabled")
+    .eq("stripe_account_id", account.id)
+    .maybeSingle();
+
+  if (lookupError) {
+    log.error("failed to look up tutor for connect account", lookupError, {
+      accountId: account.id,
+    });
+    return;
+  }
+  if (!tutorProfile) {
+    log.error("account.updated for an account with no matching tutor", undefined, {
+      accountId: account.id,
+    });
+    return;
+  }
+
+  const chargesEnabled = account.charges_enabled ?? false;
+  if (chargesEnabled === tutorProfile.stripe_charges_enabled) {
+    // No-op: account.updated fires repeatedly as onboarding progresses
+    // (e.g. individual fields being verified) well before charges_enabled
+    // itself changes value.
+    return;
+  }
+
+  const { error: updateError } = await admin
+    .from("tutor_profiles")
+    .update({ stripe_charges_enabled: chargesEnabled })
+    .eq("id", tutorProfile.id);
+
+  if (updateError) {
+    log.error("failed to sync stripe_charges_enabled", updateError, {
+      tutorId: tutorProfile.id,
+      accountId: account.id,
+    });
+    return;
+  }
+
+  if (chargesEnabled) {
+    await NotificationService.emit({
+      userId: tutorProfile.id,
+      type: "payouts_enabled",
+      title: "Payouts are active",
+      body: "Your Stripe account is verified. You'll now receive payouts automatically after each paid lesson.",
+      data: { href: "/tutor/payouts" },
     });
   }
 }

@@ -39,6 +39,9 @@ const {
   handlePaymentIntentSucceeded,
   handlePaymentIntentFailed,
   handleCheckoutSessionExpired,
+  handleAccountUpdated,
+  shouldProcessEvent,
+  markEventProcessed,
 } = await import("@/lib/stripe/webhook-handlers");
 
 function seed(overrides?: Partial<Tables>) {
@@ -269,5 +272,135 @@ describe("shared Stripe account isolation (Lingora)", () => {
     await handleCheckoutSessionCompleted(session({ metadata: { booking_id: BOOKING } }));
 
     expect(booking().status).toBe("pending_payment");
+  });
+});
+
+const ACCOUNT = "acct_1";
+
+const account = (over: Partial<Stripe.Account> = {}) =>
+  ({
+    id: ACCOUNT,
+    charges_enabled: true,
+    metadata: { app: "royalpal", tutor_id: TUTOR },
+    ...over,
+  }) as unknown as Stripe.Account;
+
+describe("account.updated", () => {
+  it("syncs stripe_charges_enabled to true when Stripe verifies the account", async () => {
+    seed({
+      tutor_profiles: [{ id: TUTOR, stripe_account_id: ACCOUNT, stripe_charges_enabled: false }],
+    });
+
+    await handleAccountUpdated(account({ charges_enabled: true }));
+
+    expect(fake.db.tutor_profiles[0].stripe_charges_enabled).toBe(true);
+    expect(emit).toHaveBeenCalledTimes(1);
+  });
+
+  it("syncs back to false if Stripe later restricts the account", async () => {
+    seed({
+      tutor_profiles: [{ id: TUTOR, stripe_account_id: ACCOUNT, stripe_charges_enabled: true }],
+    });
+
+    await handleAccountUpdated(account({ charges_enabled: false }));
+
+    expect(fake.db.tutor_profiles[0].stripe_charges_enabled).toBe(false);
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("is a no-op when the value hasn't actually changed (avoids notification spam)", async () => {
+    seed({
+      tutor_profiles: [{ id: TUTOR, stripe_account_id: ACCOUNT, stripe_charges_enabled: true }],
+    });
+
+    await handleAccountUpdated(account({ charges_enabled: true }));
+
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("ignores an account with no matching tutor row", async () => {
+    seed({ tutor_profiles: [] });
+
+    await expect(handleAccountUpdated(account())).resolves.toBeUndefined();
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("ignores another app's account.updated (shared Stripe account)", async () => {
+    seed({
+      tutor_profiles: [{ id: TUTOR, stripe_account_id: ACCOUNT, stripe_charges_enabled: false }],
+    });
+
+    await handleAccountUpdated(account({ metadata: { app: "lingora" } }));
+
+    expect(fake.db.tutor_profiles[0].stripe_charges_enabled).toBe(false);
+  });
+
+  it("fails closed on an untagged account.updated", async () => {
+    seed({
+      tutor_profiles: [{ id: TUTOR, stripe_account_id: ACCOUNT, stripe_charges_enabled: false }],
+    });
+
+    await handleAccountUpdated(account({ metadata: {} }));
+
+    expect(fake.db.tutor_profiles[0].stripe_charges_enabled).toBe(false);
+  });
+});
+
+describe("stripe_events idempotency ledger", () => {
+  const evt = (id = "evt_1", type = "payment_intent.succeeded") =>
+    ({ id, type, data: { object: {} } }) as unknown as Stripe.Event;
+
+  it("records a new event and returns true (process it)", async () => {
+    seed({ stripe_events: [] });
+
+    const proceed = await shouldProcessEvent(evt());
+
+    expect(proceed).toBe(true);
+    expect(fake.db.stripe_events).toHaveLength(1);
+    // Not marked processed yet — the fake omits an unset key entirely
+    // rather than storing Postgres's NULL, so check falsy rather than null.
+    expect(fake.db.stripe_events[0].processed_at).toBeFalsy();
+  });
+
+  it("returns false for an event already fully processed (true duplicate)", async () => {
+    seed({
+      stripe_events: [
+        {
+          id: "evt_1",
+          type: "payment_intent.succeeded",
+          payload: {},
+          processed_at: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+
+    const proceed = await shouldProcessEvent(evt());
+
+    expect(proceed).toBe(false);
+  });
+
+  it("returns true to reprocess an event that was recorded but never finished (prior crash)", async () => {
+    seed({
+      stripe_events: [
+        { id: "evt_1", type: "payment_intent.succeeded", payload: {}, processed_at: null },
+      ],
+    });
+
+    const proceed = await shouldProcessEvent(evt());
+
+    expect(proceed).toBe(true);
+    expect(fake.db.stripe_events).toHaveLength(1); // not inserted a second time
+  });
+
+  it("markEventProcessed sets processed_at", async () => {
+    seed({
+      stripe_events: [
+        { id: "evt_1", type: "payment_intent.succeeded", payload: {}, processed_at: null },
+      ],
+    });
+
+    await markEventProcessed("evt_1");
+
+    expect(fake.db.stripe_events[0].processed_at).not.toBeNull();
   });
 });

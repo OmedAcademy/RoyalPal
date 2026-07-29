@@ -18,6 +18,9 @@ const handleCheckoutSessionCompleted = vi.fn();
 const handlePaymentIntentSucceeded = vi.fn();
 const handlePaymentIntentFailed = vi.fn();
 const handleCheckoutSessionExpired = vi.fn();
+const handleAccountUpdated = vi.fn();
+const shouldProcessEvent = vi.fn();
+const markEventProcessed = vi.fn();
 
 vi.mock("@/lib/stripe/client", () => ({
   getStripe: () => ({ webhooks: { constructEvent } }),
@@ -28,11 +31,20 @@ vi.mock("@/lib/stripe/webhook-handlers", () => ({
   handlePaymentIntentSucceeded: (...a: unknown[]) => handlePaymentIntentSucceeded(...a),
   handlePaymentIntentFailed: (...a: unknown[]) => handlePaymentIntentFailed(...a),
   handleCheckoutSessionExpired: (...a: unknown[]) => handleCheckoutSessionExpired(...a),
+  handleAccountUpdated: (...a: unknown[]) => handleAccountUpdated(...a),
+  shouldProcessEvent: (...a: unknown[]) => shouldProcessEvent(...a),
+  markEventProcessed: (...a: unknown[]) => markEventProcessed(...a),
 }));
 
 // The route refuses to run without a configured secret (see the
 // misconfiguration guard); set one for the tests that exercise verification.
 process.env.STRIPE_WEBHOOK_SECRET = "whsec_test";
+
+// Default: every event is new (not a duplicate delivery). Individual tests
+// override with mockResolvedValueOnce(false) to exercise the skip path.
+// mockResolvedValue (unlike mockClear in beforeEach) survives clearAllMocks.
+shouldProcessEvent.mockResolvedValue(true);
+markEventProcessed.mockResolvedValue(undefined);
 
 const { POST } = await import("@/app/api/webhooks/stripe/route");
 
@@ -119,13 +131,16 @@ describe("event dispatch", () => {
       ["checkout.session.expired", handleCheckoutSessionExpired],
       ["payment_intent.succeeded", handlePaymentIntentSucceeded],
       ["payment_intent.payment_failed", handlePaymentIntentFailed],
+      ["account.updated", handleAccountUpdated],
     ];
 
     for (const [type, handler] of cases) {
       vi.clearAllMocks();
+      shouldProcessEvent.mockResolvedValue(true);
       const res = await POST(signed(type));
       expect(res.status, type).toBe(200);
       expect(handler, type).toHaveBeenCalledTimes(1);
+      expect(markEventProcessed, type).toHaveBeenCalledTimes(1);
     }
   });
 
@@ -142,5 +157,36 @@ describe("event dispatch", () => {
     const res = await POST(signed("payment_intent.succeeded"));
 
     expect(res.status).toBe(500);
+  });
+
+  it("does not mark the event processed when its handler throws (so a retry can reprocess)", async () => {
+    handlePaymentIntentSucceeded.mockRejectedValueOnce(new Error("db down"));
+
+    await POST(signed("payment_intent.succeeded"));
+
+    expect(markEventProcessed).not.toHaveBeenCalled();
+  });
+});
+
+describe("idempotency ledger", () => {
+  const signed = (type: string) => {
+    constructEvent.mockReturnValue({ type, data: { object: { id: "obj_1" } } });
+    return request("{}", { "stripe-signature": "sig" });
+  };
+
+  it("skips dispatch entirely for an already-processed duplicate delivery", async () => {
+    shouldProcessEvent.mockResolvedValueOnce(false);
+
+    const res = await POST(signed("payment_intent.succeeded"));
+
+    expect(res.status).toBe(200);
+    expect(handlePaymentIntentSucceeded).not.toHaveBeenCalled();
+    expect(markEventProcessed).not.toHaveBeenCalled();
+  });
+
+  it("marks the event processed only after its handler succeeds", async () => {
+    await POST(signed("checkout.session.completed"));
+
+    expect(markEventProcessed).toHaveBeenCalledTimes(1);
   });
 });
