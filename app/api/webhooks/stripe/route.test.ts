@@ -19,6 +19,7 @@ const handlePaymentIntentSucceeded = vi.fn();
 const handlePaymentIntentFailed = vi.fn();
 const handleCheckoutSessionExpired = vi.fn();
 const handleAccountUpdated = vi.fn();
+const handleChargeRefunded = vi.fn();
 const shouldProcessEvent = vi.fn();
 const markEventProcessed = vi.fn();
 
@@ -32,6 +33,7 @@ vi.mock("@/lib/stripe/webhook-handlers", () => ({
   handlePaymentIntentFailed: (...a: unknown[]) => handlePaymentIntentFailed(...a),
   handleCheckoutSessionExpired: (...a: unknown[]) => handleCheckoutSessionExpired(...a),
   handleAccountUpdated: (...a: unknown[]) => handleAccountUpdated(...a),
+  handleChargeRefunded: (...a: unknown[]) => handleChargeRefunded(...a),
   shouldProcessEvent: (...a: unknown[]) => shouldProcessEvent(...a),
   markEventProcessed: (...a: unknown[]) => markEventProcessed(...a),
 }));
@@ -132,6 +134,7 @@ describe("event dispatch", () => {
       ["payment_intent.succeeded", handlePaymentIntentSucceeded],
       ["payment_intent.payment_failed", handlePaymentIntentFailed],
       ["account.updated", handleAccountUpdated],
+      ["charge.refunded", handleChargeRefunded],
     ];
 
     for (const [type, handler] of cases) {

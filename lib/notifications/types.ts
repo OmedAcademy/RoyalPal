@@ -11,6 +11,7 @@ export type NotificationType =
   | "booking_cancelled"
   | "payment_succeeded"
   | "payment_failed"
+  | "payment_refunded"
   | "tutor_approved"
   | "tutor_rejected"
   | "payouts_enabled"
@@ -28,6 +29,7 @@ export const NOTIFICATION_META: Record<NotificationType, NotificationMeta> = {
   booking_cancelled: { category: "bookings", icon: "🚫" },
   payment_succeeded: { category: "payments", icon: "💳" },
   payment_failed: { category: "payments", icon: "⚠️" },
+  payment_refunded: { category: "payments", icon: "↩️" },
   tutor_approved: { category: "account", icon: "🎓" },
   tutor_rejected: { category: "account", icon: "📝" },
   payouts_enabled: { category: "account", icon: "💰" },

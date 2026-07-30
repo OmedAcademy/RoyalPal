@@ -416,3 +416,95 @@ export async function handleAccountUpdated(account: Stripe.Account): Promise<voi
     });
   }
 }
+
+/**
+ * Syncs a Stripe-confirmed refund onto payments/bookings. This is the ONLY
+ * place either row is marked refunded — lib/actions/admin.ts's
+ * refundBooking only ever calls stripe.refunds.create and stops; a
+ * successful API response means Stripe accepted the request, not that the
+ * transfer reversal actually settled.
+ *
+ * Charge objects don't carry the app/platform/environment metadata (Stripe
+ * does not copy PaymentIntent metadata onto the Charge, the same reason
+ * Session metadata is explicitly re-set on payment_intent_data at checkout
+ * time), so ownership can't be checked via isRoyalPalMetadata here. Instead
+ * this looks the PaymentIntent up in our OWN payments table — a row that
+ * only ever exists because it already passed that same metadata check when
+ * the payment first succeeded — which is a strictly stronger guarantee:
+ * a foreign (e.g. Lingora) charge simply has no matching row and is
+ * ignored, the same fail-closed outcome as the metadata check elsewhere.
+ */
+export async function handleChargeRefunded(charge: Stripe.Charge): Promise<void> {
+  const paymentIntentId = extractPaymentIntentId(charge.payment_intent);
+  if (!paymentIntentId) return;
+
+  const admin = createAdminClient();
+  const { data: payment } = await admin
+    .from("payments")
+    .select("booking_id, status")
+    .eq("stripe_payment_intent_id", paymentIntentId)
+    .maybeSingle();
+
+  if (!payment) return; // Not one of ours — fails closed.
+  if (payment.status === "refunded") return; // Already synced.
+
+  const { error: paymentError } = await admin
+    .from("payments")
+    .update({ status: "refunded" })
+    .eq("booking_id", payment.booking_id)
+    .neq("status", "refunded");
+
+  if (paymentError) {
+    log.error("failed to record refunded payment", paymentError, {
+      bookingId: payment.booking_id,
+    });
+    return;
+  }
+
+  const { data: booking } = await admin
+    .from("bookings")
+    .select("status, student_id, tutor_id")
+    .eq("id", payment.booking_id)
+    .maybeSingle();
+
+  if (!booking) return;
+
+  // The booking_status transition trigger only allows confirmed/completed
+  // -> refunded. A booking already cancelled before the refund lands (a
+  // paid lesson cancelled, then separately refunded) can't make this
+  // transition — the payment row above is still correctly marked refunded
+  // regardless, so the ledger stays accurate even if the booking's own
+  // status can't follow. Logged, not thrown: this is a known, accepted
+  // edge case, not a failure to alert on loudly.
+  if (booking.status === "confirmed" || booking.status === "completed") {
+    const { error: bookingError } = await admin
+      .from("bookings")
+      .update({ status: "refunded" })
+      .eq("id", payment.booking_id)
+      .neq("status", "refunded");
+
+    if (bookingError) {
+      log.error("failed to mark booking refunded", bookingError, {
+        bookingId: payment.booking_id,
+      });
+      return;
+    }
+  }
+
+  await NotificationService.emitMany([
+    {
+      userId: booking.student_id,
+      type: "payment_refunded",
+      title: "Refund issued",
+      body: "Your payment for this lesson has been refunded.",
+      data: { href: "/student/bookings" },
+    },
+    {
+      userId: booking.tutor_id,
+      type: "payment_refunded",
+      title: "A lesson payment was refunded",
+      body: "The payment for this lesson was refunded to the student.",
+      data: { href: "/tutor/bookings" },
+    },
+  ]);
+}

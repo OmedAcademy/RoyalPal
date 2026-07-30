@@ -308,6 +308,7 @@ export async function listBookings(status?: BookingStatus): Promise<AdminBooking
 
 export type AdminPaymentRow = {
   id: string;
+  booking_id: string;
   amount_cents: number;
   currency: string;
   status: PaymentStatus;
@@ -320,6 +321,7 @@ export async function listPayments(): Promise<AdminPaymentRow[]> {
   const admin = createAdminClient();
   type Row = {
     id: string;
+    booking_id: string;
     amount_cents: number;
     currency: string;
     status: PaymentStatus;
@@ -334,7 +336,7 @@ export async function listPayments(): Promise<AdminPaymentRow[]> {
   const { data } = await admin
     .from("payments")
     .select(
-      "id, amount_cents, currency, status, created_at, paid_at, bookings(student:profiles!bookings_student_id_fkey(full_name), tutor_profiles!bookings_tutor_id_fkey(profiles!tutor_profiles_id_fkey(full_name)), subjects(name))",
+      "id, booking_id, amount_cents, currency, status, created_at, paid_at, bookings(student:profiles!bookings_student_id_fkey(full_name), tutor_profiles!bookings_tutor_id_fkey(profiles!tutor_profiles_id_fkey(full_name)), subjects(name))",
     )
     .order("created_at", { ascending: false })
     .limit(100)
@@ -342,6 +344,7 @@ export async function listPayments(): Promise<AdminPaymentRow[]> {
 
   return (data ?? []).map((r) => ({
     id: r.id,
+    booking_id: r.booking_id,
     amount_cents: r.amount_cents,
     currency: r.currency,
     status: r.status,

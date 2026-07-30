@@ -5,6 +5,7 @@ import { getStripe } from "@/lib/stripe/client";
 import { logger, newRequestId } from "@/lib/observability/logger";
 import {
   handleAccountUpdated,
+  handleChargeRefunded,
   handleCheckoutSessionCompleted,
   handleCheckoutSessionExpired,
   handlePaymentIntentFailed,
@@ -88,6 +89,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         break;
       case "account.updated":
         await handleAccountUpdated(event.data.object);
+        break;
+      case "charge.refunded":
+        await handleChargeRefunded(event.data.object);
         break;
       default:
         // Unhandled event types are expected — Stripe sends far more event

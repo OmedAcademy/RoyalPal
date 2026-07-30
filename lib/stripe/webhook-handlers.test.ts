@@ -40,6 +40,7 @@ const {
   handlePaymentIntentFailed,
   handleCheckoutSessionExpired,
   handleAccountUpdated,
+  handleChargeRefunded,
   shouldProcessEvent,
   markEventProcessed,
 } = await import("@/lib/stripe/webhook-handlers");
@@ -402,5 +403,96 @@ describe("stripe_events idempotency ledger", () => {
     await markEventProcessed("evt_1");
 
     expect(fake.db.stripe_events[0].processed_at).not.toBeNull();
+  });
+});
+
+const charge = (over: Partial<Stripe.Charge> = {}) =>
+  ({
+    id: "ch_1",
+    payment_intent: "pi_1",
+    ...over,
+  }) as unknown as Stripe.Charge;
+
+describe("charge.refunded", () => {
+  it("marks the payment and a confirmed booking refunded, and notifies both parties", async () => {
+    seed({
+      bookings: [{ id: BOOKING, status: "confirmed", student_id: STUDENT, tutor_id: TUTOR }],
+      payments: [
+        { id: "p1", booking_id: BOOKING, stripe_payment_intent_id: "pi_1", status: "succeeded" },
+      ],
+    });
+
+    await handleChargeRefunded(charge());
+
+    expect(payment().status).toBe("refunded");
+    expect(booking().status).toBe("refunded");
+    expect(emitMany).toHaveBeenCalledTimes(1);
+    const notified = (emitMany.mock.calls[0][0] as Array<{ userId: string }>).map(
+      (n) => n.userId,
+    );
+    expect(notified).toEqual([STUDENT, TUTOR]);
+  });
+
+  it("also transitions a completed booking to refunded", async () => {
+    seed({
+      bookings: [{ id: BOOKING, status: "completed", student_id: STUDENT, tutor_id: TUTOR }],
+      payments: [
+        { id: "p1", booking_id: BOOKING, stripe_payment_intent_id: "pi_1", status: "succeeded" },
+      ],
+    });
+
+    await handleChargeRefunded(charge());
+
+    expect(booking().status).toBe("refunded");
+  });
+
+  it("marks the payment refunded even when the booking's own status can't follow (already cancelled)", async () => {
+    seed({
+      bookings: [{ id: BOOKING, status: "cancelled", student_id: STUDENT, tutor_id: TUTOR }],
+      payments: [
+        { id: "p1", booking_id: BOOKING, stripe_payment_intent_id: "pi_1", status: "succeeded" },
+      ],
+    });
+
+    await handleChargeRefunded(charge());
+
+    expect(payment().status).toBe("refunded");
+    expect(booking().status).toBe("cancelled");
+  });
+
+  it("is idempotent — a duplicate delivery for an already-refunded payment does not notify again", async () => {
+    seed({
+      bookings: [{ id: BOOKING, status: "refunded", student_id: STUDENT, tutor_id: TUTOR }],
+      payments: [
+        { id: "p1", booking_id: BOOKING, stripe_payment_intent_id: "pi_1", status: "refunded" },
+      ],
+    });
+
+    await handleChargeRefunded(charge());
+
+    expect(emitMany).not.toHaveBeenCalled();
+  });
+
+  it("ignores a charge with no matching payment (foreign / shared-account charge)", async () => {
+    seed({
+      bookings: [{ id: BOOKING, status: "confirmed", student_id: STUDENT, tutor_id: TUTOR }],
+      payments: [],
+    });
+
+    await handleChargeRefunded(charge({ payment_intent: "pi_unknown" }));
+
+    expect(booking().status).toBe("confirmed");
+    expect(emitMany).not.toHaveBeenCalled();
+  });
+
+  it("ignores a charge with no payment_intent at all", async () => {
+    seed({
+      payments: [
+        { id: "p1", booking_id: BOOKING, stripe_payment_intent_id: "pi_1", status: "succeeded" },
+      ],
+    });
+
+    await expect(handleChargeRefunded(charge({ payment_intent: null }))).resolves.toBeUndefined();
+    expect(payment().status).toBe("succeeded");
   });
 });

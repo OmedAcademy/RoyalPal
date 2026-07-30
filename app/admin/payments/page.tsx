@@ -1,5 +1,6 @@
 import { listPayments } from "@/lib/supabase/admin-data";
 import { AdminTable, Th, Td } from "@/components/admin/AdminTable";
+import { RefundButton } from "@/components/admin/RefundButton";
 import { formatMoney, formatDateTime } from "@/lib/utils/format";
 import type { PaymentStatus } from "@/types/database";
 
@@ -18,8 +19,9 @@ export default async function AdminPaymentsPage() {
     <div className="flex flex-col gap-6">
       <h1 className="font-display text-3xl font-semibold tracking-tight">Payment management</h1>
       <p className="text-muted -mt-2 text-sm">
-        Read-only ledger. Refunds move real money and are intentionally not executed from this
-        console — they belong to a separate, audited Stripe refund flow (planned).
+        Refunding a payment reverses the tutor&apos;s transfer and RoyalPal&apos;s fee
+        automatically when the lesson was paid through a connected Stripe account. A payment&apos;s
+        status only updates to &quot;refunded&quot; once Stripe confirms it via webhook.
       </p>
 
       <AdminTable
@@ -33,6 +35,7 @@ export default async function AdminPaymentsPage() {
             <Th>Status</Th>
             <Th>Paid</Th>
             <Th className="text-right">Amount</Th>
+            <Th className="text-right">Action</Th>
           </>
         }
       >
@@ -53,6 +56,9 @@ export default async function AdminPaymentsPage() {
             </Td>
             <Td className="text-right whitespace-nowrap">
               {formatMoney(p.amount_cents, p.currency)}
+            </Td>
+            <Td className="text-right">
+              {p.status === "succeeded" && <RefundButton bookingId={p.booking_id} />}
             </Td>
           </tr>
         ))}
