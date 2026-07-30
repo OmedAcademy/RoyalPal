@@ -171,12 +171,29 @@ export async function createBooking(
 
   const { data: tutorProfile } = await supabase
     .from("tutor_profiles")
-    .select("hourly_rate_cents, trial_price_cents, currency, verification_status")
+    .select(
+      "hourly_rate_cents, trial_price_cents, currency, verification_status, stripe_charges_enabled",
+    )
     .eq("id", tutorId)
     .maybeSingle();
 
   if (!tutorProfile || tutorProfile.verification_status !== "approved") {
     return { error: "This tutor is not available for booking" };
+  }
+
+  // Paid (standard) bookings require the tutor to have completed Stripe
+  // Connect onboarding — otherwise there's nowhere for their share of the
+  // charge to go. Trial lessons are deliberately exempt (locked product
+  // decision): they stay bookable so a student can still try a tutor while
+  // onboarding is pending. stripe_charges_enabled is read from OUR OWN
+  // tutor_profiles row keyed by tutorId — never inferable from client
+  // input — and is set exclusively by the account.updated webhook
+  // (lib/stripe/webhook-handlers.ts), never by anything client-facing.
+  if (lessonType === "standard" && !tutorProfile.stripe_charges_enabled) {
+    return {
+      error:
+        "This tutor is not yet accepting payments. Try booking a trial lesson instead, or check back soon.",
+    };
   }
 
   if (lessonType === "trial" && tutorProfile.trial_price_cents === null) {
@@ -306,12 +323,22 @@ export async function retryBookingPayment(
 
   const { data: tutorProfile } = await supabase
     .from("tutor_profiles")
-    .select("verification_status")
+    .select("verification_status, stripe_charges_enabled")
     .eq("id", booking.tutor_id)
     .maybeSingle();
 
   if (!tutorProfile || tutorProfile.verification_status !== "approved") {
     return { error: "This tutor is no longer available for booking" };
+  }
+
+  // Same gate as createBooking, re-checked here because a tutor's Connect
+  // status can change between the original booking attempt and a retry
+  // (e.g. Stripe restricts their account for a compliance review).
+  const lessonType = booking.lesson_duration_minutes === 30 ? "trial" : "standard";
+  if (lessonType === "standard" && !tutorProfile.stripe_charges_enabled) {
+    return {
+      error: "This tutor is not currently accepting payments. Please check back soon.",
+    };
   }
 
   let checkoutUrl: string;

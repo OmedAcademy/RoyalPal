@@ -82,7 +82,14 @@ beforeEach(() => {
           paid_at: null,
         },
       ],
-      tutor_profiles: [{ id: TUTOR, verification_status: "approved", currency: "usd" }],
+      tutor_profiles: [
+        {
+          id: TUTOR,
+          verification_status: "approved",
+          currency: "usd",
+          stripe_charges_enabled: true,
+        },
+      ],
       subjects: [{ id: 1, name: "English" }],
       profiles: [
         { id: TUTOR, full_name: "Tutor" },

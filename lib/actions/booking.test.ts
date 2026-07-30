@@ -71,7 +71,12 @@ function form(over: Record<string, string> = {}): FormData {
 }
 
 function seed(
-  opts: { verification?: string; trialPrice?: number | null; user?: string | null } = {},
+  opts: {
+    verification?: string;
+    trialPrice?: number | null;
+    user?: string | null;
+    chargesEnabled?: boolean;
+  } = {},
 ) {
   fake = createFakeSupabase(
     {
@@ -82,6 +87,10 @@ function seed(
           trial_price_cents: opts.trialPrice === undefined ? 2000 : opts.trialPrice,
           currency: "usd",
           verification_status: opts.verification ?? "approved",
+          // Defaults to true so every pre-existing test (written before
+          // Connect gating existed) keeps exercising standard bookings
+          // without needing to know about Stripe Connect at all.
+          stripe_charges_enabled: opts.chargesEnabled ?? true,
         },
       ],
       tutor_subjects: [{ tutor_id: TUTOR, subject_id: 1 }],
@@ -253,6 +262,49 @@ describe("createBooking — Connect destination-charge plumbing", () => {
   });
 });
 
+describe("createBooking — Connect payout gate (Milestone 2.6)", () => {
+  it("refuses a standard booking when the tutor hasn't completed Connect onboarding", async () => {
+    seed({ chargesEnabled: false });
+
+    const res = await createBooking({}, form());
+
+    expect(res.error).toBe(
+      "This tutor is not yet accepting payments. Try booking a trial lesson instead, or check back soon.",
+    );
+    expect(fake.db.bookings).toHaveLength(0);
+    expect(createCheckout).not.toHaveBeenCalled();
+  });
+
+  it("still allows a trial booking when the tutor hasn't completed Connect onboarding", async () => {
+    seed({ chargesEnabled: false });
+
+    const url = await captureRedirect(() =>
+      createBooking({}, form({ lessonType: "trial", durationMinutes: "30" })),
+    );
+
+    expect(url).toBe("https://checkout.test/x");
+    expect(fake.db.bookings).toHaveLength(1);
+  });
+
+  it("allows a standard booking once the tutor is charges_enabled", async () => {
+    seed({ chargesEnabled: true });
+
+    const url = await captureRedirect(() => createBooking({}, form()));
+
+    expect(url).toBe("https://checkout.test/x");
+  });
+
+  it("reads charges_enabled from the tutor's own row, never from client input", async () => {
+    seed({ chargesEnabled: false });
+
+    // A hostile client claims charges are enabled via an unexpected field;
+    // it must have no effect since the gate never reads form input for this.
+    const res = await createBooking({}, form({ stripe_charges_enabled: "true" }));
+
+    expect(res.error).toContain("not yet accepting payments");
+  });
+});
+
 describe("cancelBooking", () => {
   beforeEach(() => {
     fake.db.bookings.push({
@@ -332,6 +384,51 @@ describe("retryBookingPayment — ownership (IDOR)", () => {
       "This booking is no longer awaiting payment",
     );
     expect(createCheckout).not.toHaveBeenCalled();
+  });
+});
+
+describe("retryBookingPayment — Connect payout gate (Milestone 2.6)", () => {
+  it("refuses to retry a standard booking once the tutor's payouts are disabled", async () => {
+    seed({ chargesEnabled: false });
+    fake.db.bookings.push({
+      id: BOOKING,
+      student_id: STUDENT,
+      tutor_id: TUTOR,
+      status: "pending_payment",
+      subject_id: 1,
+      lesson_duration_minutes: 60,
+      price_cents: 5000,
+      platform_fee_cents: 750,
+      currency: "usd",
+    });
+    const fd = new FormData();
+    fd.set("bookingId", BOOKING);
+
+    const res = await retryBookingPayment({}, fd);
+
+    expect(res.error).toBe("This tutor is not currently accepting payments. Please check back soon.");
+    expect(createCheckout).not.toHaveBeenCalled();
+  });
+
+  it("still allows retrying a trial booking when the tutor's payouts are disabled", async () => {
+    seed({ chargesEnabled: false });
+    fake.db.bookings.push({
+      id: BOOKING,
+      student_id: STUDENT,
+      tutor_id: TUTOR,
+      status: "pending_payment",
+      subject_id: 1,
+      lesson_duration_minutes: 30,
+      price_cents: 2000,
+      platform_fee_cents: 300,
+      currency: "usd",
+    });
+    const fd = new FormData();
+    fd.set("bookingId", BOOKING);
+
+    const url = await captureRedirect(() => retryBookingPayment({}, fd));
+
+    expect(url).toBe("https://checkout.test/x");
   });
 });
 

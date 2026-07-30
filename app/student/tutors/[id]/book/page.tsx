@@ -85,6 +85,14 @@ export default async function BookTutorPage({
             you&apos;re ready.
           </p>
         )}
+        {!tutor.stripe_charges_enabled && (
+          <p role="status" className="mt-2 text-sm text-amber-700 dark:text-amber-400">
+            This tutor is not yet accepting payments
+            {tutor.trial_price_cents !== null
+              ? " for standard lessons — a trial lesson is still bookable below."
+              : "."}
+          </p>
+        )}
       </div>
 
       <LessonTypeSelector
@@ -94,13 +102,19 @@ export default async function BookTutorPage({
         currency={tutor.currency}
       />
 
-      <BookingForm
-        tutorId={id}
-        subjects={(subjects ?? []).map((s) => ({ value: String(s.id), label: s.name }))}
-        slotGroups={Array.from(groups.values())}
-        durationMinutes={durationMinutes}
-        lessonType={lessonType}
-      />
+      {lessonType === "standard" && !tutor.stripe_charges_enabled ? (
+        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          Standard lessons aren&apos;t bookable for this tutor yet.
+        </p>
+      ) : (
+        <BookingForm
+          tutorId={id}
+          subjects={(subjects ?? []).map((s) => ({ value: String(s.id), label: s.name }))}
+          slotGroups={Array.from(groups.values())}
+          durationMinutes={durationMinutes}
+          lessonType={lessonType}
+        />
+      )}
     </div>
   );
 }

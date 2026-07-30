@@ -16,6 +16,10 @@ export type TutorSearchResult = {
   full_name: string;
   avatar_url: string | null;
   subject_ids: number[];
+  /** Whether this tutor can currently accept a PAID booking (Stripe
+   * Connect onboarding complete and verified). Trial/free bookings are
+   * unaffected — see the gate in lib/actions/booking.ts. */
+  stripe_charges_enabled: boolean;
 };
 
 export type TutorSearchFilters = {
@@ -42,6 +46,7 @@ type RawTutorRow = {
   avg_rating: number | null;
   total_reviews: number;
   video_url: string | null;
+  stripe_charges_enabled: boolean;
   profiles: { full_name: string; avatar_url: string | null } | null;
   tutor_subjects: { subject_id: number }[] | null;
 };
@@ -50,7 +55,7 @@ type RawTutorRow = {
 // indirect tutor_profiles -> favorites -> profiles path and refuses to
 // embed without an explicit FK name.
 const TUTOR_SELECT =
-  "id, headline, bio, hourly_rate_cents, trial_price_cents, currency, teaching_languages, specializations, avg_rating, total_reviews, video_url, profiles!tutor_profiles_id_fkey(full_name, avatar_url), tutor_subjects(subject_id)";
+  "id, headline, bio, hourly_rate_cents, trial_price_cents, currency, teaching_languages, specializations, avg_rating, total_reviews, video_url, stripe_charges_enabled, profiles!tutor_profiles_id_fkey(full_name, avatar_url), tutor_subjects(subject_id)";
 
 function normalizeTutorRow(row: RawTutorRow): TutorSearchResult {
   return {
@@ -65,6 +70,7 @@ function normalizeTutorRow(row: RawTutorRow): TutorSearchResult {
     avg_rating: row.avg_rating,
     total_reviews: row.total_reviews,
     video_url: row.video_url,
+    stripe_charges_enabled: row.stripe_charges_enabled,
     full_name: row.profiles?.full_name ?? "Tutor",
     avatar_url: row.profiles?.avatar_url ?? null,
     subject_ids: (row.tutor_subjects ?? []).map((s) => s.subject_id),

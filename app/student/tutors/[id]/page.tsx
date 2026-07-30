@@ -100,6 +100,18 @@ export default async function TutorDetailPage({ params }: { params: Promise<{ id
         </div>
       )}
 
+      {!tutor.stripe_charges_enabled && (
+        <p
+          role="status"
+          className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300"
+        >
+          This tutor is not yet accepting payments
+          {tutor.trial_price_cents !== null
+            ? " for standard lessons — a trial lesson is still bookable."
+            : "."}
+        </p>
+      )}
+
       {tutor.teaching_languages.length > 0 && (
         <div>
           <h2 className="mb-1 text-sm font-medium">Teaches in</h2>
