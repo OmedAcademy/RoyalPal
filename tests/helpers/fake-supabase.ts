@@ -28,7 +28,11 @@ export type Control = { insertError: DbError | null };
 class Query implements PromiseLike<Result<Row[]>> {
   private filters: [string, unknown][] = [];
   private negativeFilters: [string, unknown][] = [];
-  private single = false;
+  // NOT named `single`: createFakeSupabase exposes a chainable `single()`
+  // METHOD by Object.assign-ing it onto the instance, which would overwrite
+  // a same-named boolean field and leave it permanently truthy — making
+  // every query, including multi-row ones, return a single row.
+  private wantsSingle = false;
 
   constructor(
     private rows: Row[],
@@ -55,13 +59,13 @@ class Query implements PromiseLike<Result<Row[]>> {
   }
 
   maybeSingle(): PromiseLike<Result<Row | null>> {
-    this.single = true;
+    this.wantsSingle = true;
     return this as unknown as PromiseLike<Result<Row | null>>;
   }
 
   /** Postgrest `.single()` — same as maybeSingle for our purposes. */
   single_(): PromiseLike<Result<Row | null>> {
-    this.single = true;
+    this.wantsSingle = true;
     return this as unknown as PromiseLike<Result<Row | null>>;
   }
 
@@ -79,18 +83,22 @@ class Query implements PromiseLike<Result<Row[]>> {
       }
       const row = { id: `row_${this.rows.length + 1}`, ...this.payload };
       this.rows.push(row);
-      return { data: this.single ? row : [row], error: null };
+      return { data: this.wantsSingle ? row : [row], error: null };
     }
 
     if (this.op === "select") {
       const found = this.rows.filter((r) => this.matches(r));
-      return this.single ? { data: found[0] ?? null, error: null } : { data: found, error: null };
+      return this.wantsSingle
+        ? { data: found[0] ?? null, error: null }
+        : { data: found, error: null };
     }
 
     if (this.op === "update") {
       const target = this.rows.filter((r) => this.matches(r));
       for (const row of target) Object.assign(row, this.payload);
-      return this.single ? { data: target[0] ?? null, error: null } : { data: target, error: null };
+      return this.wantsSingle
+        ? { data: target[0] ?? null, error: null }
+        : { data: target, error: null };
     }
 
     // upsert

@@ -41,6 +41,8 @@ const {
   handleCheckoutSessionExpired,
   handleAccountUpdated,
   handleChargeRefunded,
+  handleTransferReversed,
+  handleChargeDisputeCreated,
   shouldProcessEvent,
   markEventProcessed,
 } = await import("@/lib/stripe/webhook-handlers");
@@ -427,9 +429,7 @@ describe("charge.refunded", () => {
     expect(payment().status).toBe("refunded");
     expect(booking().status).toBe("refunded");
     expect(emitMany).toHaveBeenCalledTimes(1);
-    const notified = (emitMany.mock.calls[0][0] as Array<{ userId: string }>).map(
-      (n) => n.userId,
-    );
+    const notified = (emitMany.mock.calls[0][0] as Array<{ userId: string }>).map((n) => n.userId);
     expect(notified).toEqual([STUDENT, TUTOR]);
   });
 
@@ -494,5 +494,208 @@ describe("charge.refunded", () => {
 
     await expect(handleChargeRefunded(charge({ payment_intent: null }))).resolves.toBeUndefined();
     expect(payment().status).toBe("succeeded");
+  });
+});
+
+const ADMIN = "admin1";
+const ACCT = "acct_tutor_1";
+
+const transfer = (over: Partial<Stripe.Transfer> = {}) =>
+  ({
+    id: "tr_1",
+    destination: ACCT,
+    transfer_group: `royalpal_booking_${BOOKING}`,
+    amount: 4250,
+    ...over,
+  }) as unknown as Stripe.Transfer;
+
+/** A payments row shaped the way the handler's embedded select reads it. */
+function payoutSeed(over: { status?: string; transfer_status?: string | null } = {}) {
+  seed({
+    profiles: [{ id: ADMIN, role: "admin" }],
+    tutor_profiles: [{ id: TUTOR, stripe_account_id: ACCT }],
+    payments: [
+      {
+        id: "p1",
+        booking_id: BOOKING,
+        stripe_payment_intent_id: "pi_1",
+        status: over.status ?? "succeeded",
+        transfer_status: over.transfer_status ?? null,
+        bookings: { tutor_id: TUTOR },
+      },
+    ],
+  });
+}
+
+describe("transfer.reversed", () => {
+  it("ignores a transfer to an account that is not one of our tutors", async () => {
+    payoutSeed();
+
+    await handleTransferReversed(transfer({ destination: "acct_someone_else" }));
+
+    expect(payment().transfer_status).toBeNull();
+    expect(emitMany).not.toHaveBeenCalled();
+  });
+
+  it("records an expected reversal (our own refund) without alerting anyone", async () => {
+    payoutSeed({ status: "refunded" });
+
+    await handleTransferReversed(transfer());
+
+    expect(payment().transfer_status).toBe("reversed");
+    expect(payment().transfer_status_reason).toBe("refund");
+    expect(payment().stripe_transfer_id).toBe("tr_1");
+    // A refund reversal is routine — alerting on it would drown the alert
+    // that actually matters.
+    expect(emitMany).not.toHaveBeenCalled();
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("alerts admins AND the tutor when money leaves with no refund on record", async () => {
+    payoutSeed({ status: "succeeded" });
+
+    await handleTransferReversed(transfer());
+
+    expect(payment().transfer_status).toBe("reversed");
+    expect(payment().transfer_status_reason).toBe("reversed_outside_royalpal");
+    expect(emitMany).toHaveBeenCalledTimes(1);
+    expect((emitMany.mock.calls[0][0] as Array<{ userId: string }>)[0].userId).toBe(ADMIN);
+    expect(emit).toHaveBeenCalledTimes(1);
+    expect(emit.mock.calls[0][0]).toMatchObject({ userId: TUTOR, type: "transfer_reversed" });
+  });
+
+  it("does not touch the student's payment status or the booking", async () => {
+    payoutSeed({ status: "succeeded" });
+
+    await handleTransferReversed(transfer());
+
+    expect(payment().status).toBe("succeeded");
+    expect(booking().status).toBe("pending_payment");
+  });
+
+  it("is idempotent — a duplicate delivery does not re-alert", async () => {
+    payoutSeed({ status: "succeeded", transfer_status: "reversed" });
+
+    await handleTransferReversed(transfer());
+
+    expect(emitMany).not.toHaveBeenCalled();
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("still alerts when the transfer_group names no resolvable booking", async () => {
+    payoutSeed();
+
+    await handleTransferReversed(transfer({ transfer_group: "group_something_else" }));
+
+    // Never blind: money left one of our tutors even if the lesson is unknown.
+    expect(emitMany).toHaveBeenCalledTimes(1);
+    expect(payment().transfer_status).toBeNull();
+  });
+
+  it("refuses to write payout state when the booking belongs to a different tutor", async () => {
+    payoutSeed();
+    fake.db.payments[0].bookings = { tutor_id: "some-other-tutor" };
+
+    await handleTransferReversed(transfer());
+
+    expect(payment().transfer_status).toBeNull();
+    expect(emitMany).toHaveBeenCalledTimes(1); // alerted, but wrote nothing
+  });
+});
+
+const dispute = (over: Partial<Stripe.Dispute> = {}) =>
+  ({
+    id: "dp_1",
+    payment_intent: "pi_1",
+    amount: 5000,
+    reason: "fraudulent",
+    status: "warning_needs_response",
+    evidence_details: { due_by: 1893456000 },
+    ...over,
+  }) as unknown as Stripe.Dispute;
+
+describe("charge.dispute.created", () => {
+  beforeEach(() => {
+    seed({
+      profiles: [{ id: ADMIN, role: "admin" }],
+      payments: [
+        {
+          id: "p1",
+          booking_id: BOOKING,
+          stripe_payment_intent_id: "pi_1",
+          status: "succeeded",
+          stripe_dispute_id: null,
+        },
+      ],
+    });
+  });
+
+  it("records the dispute and alerts every admin", async () => {
+    await handleChargeDisputeCreated(dispute());
+
+    expect(payment().stripe_dispute_id).toBe("dp_1");
+    expect(payment().dispute_status).toBe("warning_needs_response");
+    expect(emitMany).toHaveBeenCalledTimes(1);
+    expect((emitMany.mock.calls[0][0] as Array<{ type: string }>)[0].type).toBe("dispute_created");
+  });
+
+  it("leaves the payment status and the booking untouched", async () => {
+    await handleChargeDisputeCreated(dispute());
+
+    // A dispute is an unadjudicated claim — it does not mean the lesson
+    // didn't happen, and nothing is clawed back from the tutor here.
+    expect(payment().status).toBe("succeeded");
+    expect(payment().transfer_status).toBeUndefined();
+    expect(booking().status).toBe("pending_payment");
+  });
+
+  it("does not notify the tutor (no money is taken from them by this handler)", async () => {
+    await handleChargeDisputeCreated(dispute());
+
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("ignores a dispute for a charge that is not ours (shared Stripe account)", async () => {
+    await handleChargeDisputeCreated(dispute({ payment_intent: "pi_lingora" }));
+
+    expect(payment().stripe_dispute_id).toBeNull();
+    expect(emitMany).not.toHaveBeenCalled();
+  });
+
+  it("ignores a dispute carrying no payment_intent", async () => {
+    await expect(
+      handleChargeDisputeCreated(dispute({ payment_intent: null })),
+    ).resolves.toBeUndefined();
+    expect(emitMany).not.toHaveBeenCalled();
+  });
+
+  it("is idempotent — the same dispute delivered twice alerts once", async () => {
+    await handleChargeDisputeCreated(dispute());
+    emitMany.mockClear();
+
+    await handleChargeDisputeCreated(dispute());
+
+    expect(emitMany).not.toHaveBeenCalled();
+  });
+
+  it("logs an error rather than silently swallowing when there is no admin to alert", async () => {
+    seed({
+      profiles: [],
+      payments: [
+        {
+          id: "p1",
+          booking_id: BOOKING,
+          stripe_payment_intent_id: "pi_1",
+          status: "succeeded",
+          stripe_dispute_id: null,
+        },
+      ],
+    });
+
+    await handleChargeDisputeCreated(dispute());
+
+    // The dispute is still recorded even though nobody could be told.
+    expect(payment().stripe_dispute_id).toBe("dp_1");
+    expect(emitMany).not.toHaveBeenCalled();
   });
 });

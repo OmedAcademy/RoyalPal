@@ -19,9 +19,9 @@ export default async function AdminPaymentsPage() {
     <div className="flex flex-col gap-6">
       <h1 className="font-display text-3xl font-semibold tracking-tight">Payment management</h1>
       <p className="text-muted -mt-2 text-sm">
-        Refunding a payment reverses the tutor&apos;s transfer and RoyalPal&apos;s fee
-        automatically when the lesson was paid through a connected Stripe account. A payment&apos;s
-        status only updates to &quot;refunded&quot; once Stripe confirms it via webhook.
+        Refunding a payment reverses the tutor&apos;s transfer and RoyalPal&apos;s fee automatically
+        when the lesson was paid through a connected Stripe account. A payment&apos;s status only
+        updates to &quot;refunded&quot; once Stripe confirms it via webhook.
       </p>
 
       <AdminTable

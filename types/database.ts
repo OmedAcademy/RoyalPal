@@ -18,6 +18,11 @@ export type EnglishLevel = "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
 export type BookingStatus =
   "pending_payment" | "confirmed" | "completed" | "cancelled" | "refunded";
 export type PaymentStatus = "requires_payment" | "succeeded" | "failed" | "refunded" | "expired";
+/** Tutor-payout state (migration 0024). Null = no transfer applies, i.e. the
+ * lesson was a plain platform charge because the tutor had not completed
+ * Connect onboarding. Distinct from PaymentStatus, which is the student's
+ * charge. */
+export type TransferStatus = "paid" | "reversed";
 
 export interface Database {
   public: {
@@ -253,6 +258,14 @@ export interface Database {
           currency: string;
           paid_at: string | null;
           created_at: string;
+          // Migration 0024. Tutor-payout and dispute state, independent of
+          // `status` (which tracks the student's charge). Written only by
+          // the Stripe webhook handlers.
+          stripe_transfer_id: string | null;
+          transfer_status: TransferStatus | null;
+          transfer_status_reason: string | null;
+          stripe_dispute_id: string | null;
+          dispute_status: string | null;
         };
         Insert: {
           id?: string;
@@ -264,6 +277,11 @@ export interface Database {
           currency?: string;
           paid_at?: string | null;
           created_at?: string;
+          stripe_transfer_id?: string | null;
+          transfer_status?: TransferStatus | null;
+          transfer_status_reason?: string | null;
+          stripe_dispute_id?: string | null;
+          dispute_status?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["payments"]["Insert"]>;
         Relationships: [];

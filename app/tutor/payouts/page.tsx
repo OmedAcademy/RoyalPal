@@ -53,16 +53,16 @@ export default async function TutorPayoutsPage({
         {status === "active" && (
           <p className="text-sm">
             <span className="font-medium text-emerald-700 dark:text-emerald-400">Connected.</span>{" "}
-            Your payouts are active — lesson earnings are transferred to your account
-            automatically after each payment.
+            Your payouts are active — lesson earnings are transferred to your account automatically
+            after each payment.
           </p>
         )}
 
         {status === "pending" && (
           <div className="flex flex-col gap-3">
             <p className="text-muted text-sm">
-              Your Stripe account has been created but onboarding isn&apos;t complete yet. Finish
-              it to start receiving payouts.
+              Your Stripe account has been created but onboarding isn&apos;t complete yet. Finish it
+              to start receiving payouts.
             </p>
             <ConnectOnboardingButton label="Continue onboarding" />
           </div>

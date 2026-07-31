@@ -1,7 +1,7 @@
 import "server-only";
 import type Stripe from "stripe";
 import { getStripe } from "@/lib/stripe/client";
-import { appMetadata } from "@/lib/stripe/app-metadata";
+import { appMetadata, bookingTransferGroup } from "@/lib/stripe/app-metadata";
 
 /** Stripe's minimum allowed Checkout Session lifetime. Bounding sessions to
  * this window (rather than the 24h default) keeps an abandoned checkout
@@ -134,10 +134,17 @@ export async function createBookingCheckoutSession(params: {
       // booking-eligibility gate; it only decides how a charge that's
       // already happening gets split. Whether an unconnected tutor should
       // be bookable at all is a separate, later decision.
+      //
+      // transfer_group is the ONLY field we control that Stripe propagates
+      // onto the Transfer it creates for a destination charge (it does not
+      // copy PaymentIntent metadata there). Without it a transfer.failed
+      // event carries no way back to the booking it was paying for — see
+      // handleTransferFailed in lib/stripe/webhook-handlers.ts.
       ...(params.tutorStripeAccountId
         ? {
             application_fee_amount: params.platformFeeCents,
             transfer_data: { destination: params.tutorStripeAccountId },
+            transfer_group: bookingTransferGroup(params.bookingId),
           }
         : {}),
     },

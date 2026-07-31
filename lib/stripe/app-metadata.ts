@@ -62,3 +62,30 @@ export function isRoyalPalMetadata(metadata: Stripe.Metadata | null | undefined)
  * PaymentIntent, and reporting/payout reconciliation reads the PaymentIntent.
  */
 export const ROYALPAL_PAYMENT_SEARCH_QUERY = `metadata['app']:'${STRIPE_APP_TAG}'`;
+
+/**
+ * Correlation key stamped on a destination charge's `transfer_group`.
+ *
+ * Stripe creates the Transfer for a destination charge itself, and does NOT
+ * copy our PaymentIntent metadata onto it — so a `transfer.failed` event
+ * arrives carrying no `booking_id` at all. `transfer_group` is the only
+ * field we set that propagates from the charge to that Transfer, which
+ * makes it the only way to answer "which lesson was this payout for?"
+ * without extra Stripe round trips.
+ *
+ * The app tag is part of the string so the shared account stays
+ * distinguishable: a transfer group belonging to a sibling product can
+ * never parse into a RoyalPal booking id.
+ */
+export function bookingTransferGroup(bookingId: string): string {
+  return `${STRIPE_APP_TAG}_booking_${bookingId}`;
+}
+
+/** Inverse of bookingTransferGroup. Null for anything not ours. */
+export function bookingIdFromTransferGroup(
+  transferGroup: string | null | undefined,
+): string | null {
+  const prefix = `${STRIPE_APP_TAG}_booking_`;
+  if (!transferGroup?.startsWith(prefix)) return null;
+  return transferGroup.slice(prefix.length) || null;
+}

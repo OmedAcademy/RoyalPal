@@ -199,7 +199,12 @@ export async function refundBooking(
     };
   }
 
-  await logAction(auth.adminId, "refund_initiated", parsed.data.bookingId, parsed.data.notes ?? undefined);
+  await logAction(
+    auth.adminId,
+    "refund_initiated",
+    parsed.data.bookingId,
+    parsed.data.notes ?? undefined,
+  );
 
   revalidatePath("/admin/payments");
   return { message: "Refund requested — it will show as refunded once Stripe confirms it." };

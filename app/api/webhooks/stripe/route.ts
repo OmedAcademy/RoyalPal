@@ -5,7 +5,9 @@ import { getStripe } from "@/lib/stripe/client";
 import { logger, newRequestId } from "@/lib/observability/logger";
 import {
   handleAccountUpdated,
+  handleChargeDisputeCreated,
   handleChargeRefunded,
+  handleTransferReversed,
   handleCheckoutSessionCompleted,
   handleCheckoutSessionExpired,
   handlePaymentIntentFailed,
@@ -92,6 +94,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         break;
       case "charge.refunded":
         await handleChargeRefunded(event.data.object);
+        break;
+      case "charge.dispute.created":
+        await handleChargeDisputeCreated(event.data.object);
+        break;
+      // Not transfer.failed: that event does not exist in this API version.
+      // See handleTransferReversed for what actually covers the "money left
+      // the tutor after a paid lesson" gap.
+      case "transfer.reversed":
+        await handleTransferReversed(event.data.object);
         break;
       default:
         // Unhandled event types are expected — Stripe sends far more event

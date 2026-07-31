@@ -17,7 +17,8 @@ vi.mock("@/lib/stripe/client", () => ({
 }));
 
 const { createBookingCheckoutSession } = await import("@/lib/stripe/checkout");
-const { ROYALPAL_PAYMENT_SEARCH_QUERY } = await import("@/lib/stripe/app-metadata");
+const { ROYALPAL_PAYMENT_SEARCH_QUERY, bookingTransferGroup, bookingIdFromTransferGroup } =
+  await import("@/lib/stripe/app-metadata");
 
 const BOOKING = "b-1";
 const STUDENT = "s-1";
@@ -133,6 +134,21 @@ describe("Connect destination charges", () => {
     expect(args().payment_intent_data.metadata.booking_id).toBe(BOOKING);
   });
 
+  it("stamps a transfer_group so the resulting Transfer can be traced to the booking", async () => {
+    // Stripe creates the Transfer for a destination charge itself and does
+    // not copy PaymentIntent metadata onto it, so transfer_group is the
+    // only correlation a transfer.reversed event will ever carry.
+    await createBookingCheckoutSession({ ...params, tutorStripeAccountId: "acct_tutor_1" });
+
+    expect(args().payment_intent_data.transfer_group).toBe(`royalpal_booking_${BOOKING}`);
+  });
+
+  it("omits transfer_group when there is no transfer to trace", async () => {
+    await createBookingCheckoutSession({ ...params, tutorStripeAccountId: null });
+
+    expect(args().payment_intent_data.transfer_group).toBeUndefined();
+  });
+
   it("never derives the fee amount from anything but the server-computed platformFeeCents", async () => {
     await createBookingCheckoutSession({
       ...params,
@@ -143,5 +159,21 @@ describe("Connect destination charges", () => {
 
     expect(args().payment_intent_data.application_fee_amount).toBe(1500);
     expect(args().line_items[0].price_data.unit_amount).toBe(9999);
+  });
+});
+
+describe("transfer_group correlation key", () => {
+  it("round-trips a booking id", () => {
+    expect(bookingIdFromTransferGroup(bookingTransferGroup("abc-123"))).toBe("abc-123");
+  });
+
+  it("fails closed on a group belonging to another app on the shared account", () => {
+    expect(bookingIdFromTransferGroup("lingora_booking_abc")).toBeNull();
+  });
+
+  it("fails closed on Stripe's own auto-generated groups and on empty input", () => {
+    expect(bookingIdFromTransferGroup("group_pi_3Abc")).toBeNull();
+    expect(bookingIdFromTransferGroup(null)).toBeNull();
+    expect(bookingIdFromTransferGroup("royalpal_booking_")).toBeNull();
   });
 });

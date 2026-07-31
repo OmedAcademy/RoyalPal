@@ -69,8 +69,7 @@ function seed(
         ? [
             {
               id: TUTOR,
-              stripe_account_id:
-                opts.stripeAccountId === undefined ? null : opts.stripeAccountId,
+              stripe_account_id: opts.stripeAccountId === undefined ? null : opts.stripeAccountId,
             },
           ]
         : [],

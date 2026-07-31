@@ -406,7 +406,9 @@ describe("retryBookingPayment — Connect payout gate (Milestone 2.6)", () => {
 
     const res = await retryBookingPayment({}, fd);
 
-    expect(res.error).toBe("This tutor is not currently accepting payments. Please check back soon.");
+    expect(res.error).toBe(
+      "This tutor is not currently accepting payments. Please check back soon.",
+    );
     expect(createCheckout).not.toHaveBeenCalled();
   });
 
