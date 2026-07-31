@@ -22,6 +22,8 @@ const handleAccountUpdated = vi.fn();
 const handleChargeRefunded = vi.fn();
 const handleTransferReversed = vi.fn();
 const handleChargeDisputeCreated = vi.fn();
+const handleChargeDisputeUpdated = vi.fn();
+const handleTransferCreated = vi.fn();
 const shouldProcessEvent = vi.fn();
 const markEventProcessed = vi.fn();
 
@@ -38,6 +40,8 @@ vi.mock("@/lib/stripe/webhook-handlers", () => ({
   handleChargeRefunded: (...a: unknown[]) => handleChargeRefunded(...a),
   handleTransferReversed: (...a: unknown[]) => handleTransferReversed(...a),
   handleChargeDisputeCreated: (...a: unknown[]) => handleChargeDisputeCreated(...a),
+  handleChargeDisputeUpdated: (...a: unknown[]) => handleChargeDisputeUpdated(...a),
+  handleTransferCreated: (...a: unknown[]) => handleTransferCreated(...a),
   shouldProcessEvent: (...a: unknown[]) => shouldProcessEvent(...a),
   markEventProcessed: (...a: unknown[]) => markEventProcessed(...a),
 }));
@@ -141,6 +145,9 @@ describe("event dispatch", () => {
       ["charge.refunded", handleChargeRefunded],
       ["charge.dispute.created", handleChargeDisputeCreated],
       ["transfer.reversed", handleTransferReversed],
+      ["transfer.created", handleTransferCreated],
+      ["charge.dispute.updated", handleChargeDisputeUpdated],
+      ["charge.dispute.closed", handleChargeDisputeUpdated],
     ];
 
     for (const [type, handler] of cases) {

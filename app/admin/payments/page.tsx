@@ -2,7 +2,7 @@ import { listPayments } from "@/lib/supabase/admin-data";
 import { AdminTable, Th, Td } from "@/components/admin/AdminTable";
 import { RefundButton } from "@/components/admin/RefundButton";
 import { formatMoney, formatDateTime } from "@/lib/utils/format";
-import type { PaymentStatus } from "@/types/database";
+import type { PaymentStatus, TransferStatus } from "@/types/database";
 
 const PAYMENT_BADGE: Record<PaymentStatus, string> = {
   succeeded: "bg-emerald-100 text-emerald-800",
@@ -10,6 +10,20 @@ const PAYMENT_BADGE: Record<PaymentStatus, string> = {
   failed: "bg-red-100 text-red-700",
   refunded: "bg-slate-100 text-slate-700",
   expired: "bg-slate-100 text-slate-700",
+};
+
+/** Payout state is about the TUTOR being paid — deliberately a separate
+ * column from Status, which is about the student's charge. */
+const PAYOUT_BADGE: Record<TransferStatus, string> = {
+  paid: "bg-emerald-100 text-emerald-800",
+  reversed: "bg-red-100 text-red-700",
+};
+
+/** Stripe's own dispute vocabulary, passed through verbatim. Only the two
+ * terminal outcomes are colour-coded; everything else is "in progress". */
+const DISPUTE_BADGE: Record<string, string> = {
+  won: "bg-emerald-100 text-emerald-800",
+  lost: "bg-red-100 text-red-700",
 };
 
 export default async function AdminPaymentsPage() {
@@ -33,6 +47,8 @@ export default async function AdminPaymentsPage() {
             <Th>Student</Th>
             <Th>Tutor</Th>
             <Th>Status</Th>
+            <Th>Payout</Th>
+            <Th>Dispute</Th>
             <Th>Paid</Th>
             <Th className="text-right">Amount</Th>
             <Th className="text-right">Action</Th>
@@ -50,6 +66,32 @@ export default async function AdminPaymentsPage() {
               >
                 {p.status}
               </span>
+            </Td>
+            <Td>
+              {p.transfer_status ? (
+                <span
+                  className={`rounded-full px-2 py-0.5 text-xs font-medium ${PAYOUT_BADGE[p.transfer_status]}`}
+                >
+                  {p.transfer_status}
+                </span>
+              ) : (
+                // No transfer applies: the lesson was a plain platform
+                // charge because the tutor hadn't connected an account.
+                <span className="text-muted text-xs">—</span>
+              )}
+            </Td>
+            <Td>
+              {p.dispute_status ? (
+                <span
+                  className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                    DISPUTE_BADGE[p.dispute_status] ?? "bg-amber-100 text-amber-800"
+                  }`}
+                >
+                  {p.dispute_status.replace(/_/g, " ")}
+                </span>
+              ) : (
+                <span className="text-muted text-xs">—</span>
+              )}
             </Td>
             <Td className="text-muted whitespace-nowrap">
               {p.paid_at ? formatDateTime(p.paid_at) : "—"}

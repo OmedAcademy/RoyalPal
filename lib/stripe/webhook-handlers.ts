@@ -519,7 +519,7 @@ export async function handleChargeRefunded(charge: Stripe.Charge): Promise<void>
 async function notifyAdmins(
   admin: AdminClient,
   input: {
-    type: "transfer_reversed" | "dispute_created";
+    type: "transfer_reversed" | "dispute_created" | "dispute_resolved";
     title: string;
     body: string;
     href: string;
@@ -547,6 +547,114 @@ async function notifyAdmins(
 function stripeId(value: string | { id: string } | null | undefined): string | null {
   if (!value) return null;
   return typeof value === "string" ? value : value.id;
+}
+
+/**
+ * Resolves a Transfer to the tutor and booking it belongs to, applying the
+ * dual ownership check both transfer handlers depend on.
+ *
+ * `transfer_group` rides on a charge; `destination` is the connected
+ * account Stripe actually paid. Requiring BOTH to agree means a
+ * mismatched pair can never write payout state onto an unrelated booking,
+ * and a transfer belonging to a sibling product on the shared account
+ * resolves to nothing at all.
+ *
+ * Returns the reason resolution failed so each caller can decide whether
+ * that silence is alarming (money left — see handleTransferReversed) or
+ * simply not ours (money arrived — see handleTransferCreated).
+ */
+type TransferOwner =
+  | { ok: true; tutorId: string; bookingId: string; payment: TransferPaymentRow }
+  | { ok: false; reason: "foreign_account" | "unresolvable_booking" | "booking_mismatch" };
+
+type TransferPaymentRow = {
+  booking_id: string;
+  status: string;
+  transfer_status: string | null;
+  bookings: { tutor_id: string } | null;
+};
+
+async function resolveTransferOwner(
+  admin: AdminClient,
+  transfer: Stripe.Transfer,
+): Promise<TransferOwner> {
+  const destination = stripeId(transfer.destination);
+  if (!destination) return { ok: false, reason: "foreign_account" };
+
+  const { data: tutorProfile } = await admin
+    .from("tutor_profiles")
+    .select("id")
+    .eq("stripe_account_id", destination)
+    .maybeSingle();
+
+  if (!tutorProfile) return { ok: false, reason: "foreign_account" };
+
+  const bookingId = bookingIdFromTransferGroup(transfer.transfer_group);
+  if (!bookingId) return { ok: false, reason: "unresolvable_booking" };
+
+  const { data: payment } = await admin
+    .from("payments")
+    .select("booking_id, status, transfer_status, bookings(tutor_id)")
+    .eq("booking_id", bookingId)
+    .maybeSingle<TransferPaymentRow>();
+
+  if (!payment || payment.bookings?.tutor_id !== tutorProfile.id) {
+    return { ok: false, reason: "booking_mismatch" };
+  }
+
+  return { ok: true, tutorId: tutorProfile.id, bookingId, payment };
+}
+
+/**
+ * The tutor's share of a destination charge reached their connected
+ * account. This is the positive half of the payout ledger.
+ *
+ * It exists so that "has this tutor been paid for this lesson?" has an
+ * answer. Without it transfer_status is only ever written on reversal,
+ * which makes silence ambiguous between "paid fine" and "we never heard
+ * anything at all" — the single most important question a payout system
+ * has to answer, unanswerable.
+ *
+ * Deliberately silent: a payout working is not news, and alerting on it
+ * would dilute the alerts that are.
+ *
+ * Never overwrites 'reversed'. Stripe guarantees neither ordering nor
+ * exactly-once delivery, so a redelivered (or simply late) transfer.created
+ * can legitimately arrive after the reversal that followed it. Resurrecting
+ * 'paid' there would report money as sitting with a tutor who no longer
+ * has it.
+ */
+export async function handleTransferCreated(transfer: Stripe.Transfer): Promise<void> {
+  const admin = createAdminClient();
+  const owner = await resolveTransferOwner(admin, transfer);
+
+  // Every rejection path is silent here. Unlike a reversal, nothing bad
+  // has happened — an unmatched transfer.created is simply not ours.
+  if (!owner.ok) return;
+
+  const { payment, bookingId, tutorId } = owner;
+  if (payment.transfer_status === "reversed" || payment.transfer_status === "paid") return;
+
+  const { error: updateError } = await admin
+    .from("payments")
+    .update({ stripe_transfer_id: transfer.id, transfer_status: "paid" })
+    .eq("booking_id", bookingId)
+    // Belt-and-braces against a concurrent reversal landing between the
+    // read above and this write: the guard is in the WHERE clause, so the
+    // database — not application ordering — is what enforces it.
+    .neq("transfer_status", "reversed");
+
+  if (updateError) {
+    log.error("failed to record transfer", updateError, { transferId: transfer.id, bookingId });
+    throw new Error(`Could not record transfer for booking ${bookingId}`);
+  }
+
+  log.info("tutor payout sent", {
+    transferId: transfer.id,
+    bookingId,
+    tutorId,
+    amountCents: transfer.amount,
+  });
 }
 
 /**
@@ -585,67 +693,35 @@ function stripeId(value: string | { id: string } | null | undefined): string | n
  * foreign transfer can never reach a write or an alert.
  */
 export async function handleTransferReversed(transfer: Stripe.Transfer): Promise<void> {
-  const destination = stripeId(transfer.destination);
-  if (!destination) return;
-
   const admin = createAdminClient();
-  const { data: tutorProfile } = await admin
-    .from("tutor_profiles")
-    .select("id")
-    .eq("stripe_account_id", destination)
-    .maybeSingle();
+  const owner = await resolveTransferOwner(admin, transfer);
 
-  if (!tutorProfile) return; // Not one of our tutors — fails closed.
+  // Unlike transfer.created, an unresolvable reversal is NOT silent: money
+  // left one of our tutors, and being unable to name the lesson is a reason
+  // to shout louder rather than stay quiet. Only a foreign destination
+  // account — provably not ours — is ignored.
+  if (!owner.ok) {
+    if (owner.reason === "foreign_account") return;
 
-  const bookingId = bookingIdFromTransferGroup(transfer.transfer_group);
+    const detail =
+      owner.reason === "unresolvable_booking"
+        ? "could not be matched to a lesson"
+        : "references a lesson that does not match the receiving account";
 
-  // Alert even when the booking can't be resolved. Money left one of our
-  // tutors; being unable to name the lesson is a reason to shout louder,
-  // not to stay silent.
-  if (!bookingId) {
-    log.error("transfer reversed with no resolvable booking", undefined, {
+    log.error("transfer reversed without a usable booking reference", undefined, {
       transferId: transfer.id,
-      destination,
-      tutorId: tutorProfile.id,
+      reason: owner.reason,
     });
     await notifyAdmins(admin, {
       type: "transfer_reversed",
       title: "Tutor payout reversed",
-      body: `A payout to a tutor was reversed and could not be matched to a lesson. Stripe transfer ${transfer.id} needs manual review.`,
+      body: `A payout to a tutor was reversed and ${detail}. Stripe transfer ${transfer.id} needs manual review.`,
       href: "/admin/payments",
     });
     return;
   }
 
-  const { data: payment } = await admin
-    .from("payments")
-    .select("booking_id, status, transfer_status, bookings(tutor_id)")
-    .eq("booking_id", bookingId)
-    .maybeSingle<{
-      booking_id: string;
-      status: string;
-      transfer_status: string | null;
-      bookings: { tutor_id: string } | null;
-    }>();
-
-  // Cross-check: transfer_group rides on a charge, but the destination
-  // account does not. Requiring both to agree means a mismatched pair can
-  // never write payout state onto an unrelated booking.
-  if (!payment || payment.bookings?.tutor_id !== tutorProfile.id) {
-    log.error("transfer reversed with a mismatched booking reference", undefined, {
-      transferId: transfer.id,
-      bookingId,
-      tutorId: tutorProfile.id,
-    });
-    await notifyAdmins(admin, {
-      type: "transfer_reversed",
-      title: "Tutor payout reversed",
-      body: `A payout to a tutor was reversed. Stripe transfer ${transfer.id} references a lesson that does not match the receiving account — needs manual review.`,
-      href: "/admin/payments",
-    });
-    return;
-  }
-
+  const { payment, bookingId, tutorId } = owner;
   if (payment.transfer_status === "reversed") return; // Already recorded.
 
   // A refund we issued is the expected cause; anything else is not.
@@ -676,7 +752,7 @@ export async function handleTransferReversed(transfer: Stripe.Transfer): Promise
   log.error("tutor payout reversed outside RoyalPal", undefined, {
     transferId: transfer.id,
     bookingId,
-    tutorId: tutorProfile.id,
+    tutorId: tutorId,
   });
 
   await notifyAdmins(admin, {
@@ -687,7 +763,7 @@ export async function handleTransferReversed(transfer: Stripe.Transfer): Promise
   });
 
   await NotificationService.emit({
-    userId: tutorProfile.id,
+    userId: tutorId,
     type: "transfer_reversed",
     title: "A payout was reversed",
     body: "A lesson payout was returned from your account. We're looking into it — no action is needed from you yet.",
@@ -768,6 +844,92 @@ export async function handleChargeDisputeCreated(dispute: Stripe.Dispute): Promi
     body: `A student disputed a lesson payment (${dispute.reason}). Stripe has already withdrawn the amount from the platform balance.${
       dueBy ? ` Evidence is due by ${dueBy.slice(0, 10)}.` : ""
     } Respond in the Stripe dashboard.`,
+    href: "/admin/payments",
+  });
+}
+
+/**
+ * Terminal dispute outcomes. Stripe's Dispute.Status also includes
+ * 'warning_closed', which closes an *early warning* rather than deciding a
+ * dispute — it carries no win/loss meaning, so it is not treated as an
+ * outcome worth waking anyone for.
+ */
+const TERMINAL_DISPUTE_STATUSES = new Set(["won", "lost"]);
+
+/**
+ * Keeps dispute_status current for the life of a dispute. Wired to BOTH
+ * charge.dispute.updated and charge.dispute.closed — the two events carry
+ * the same Dispute object and differ only in when Stripe sends them, so
+ * handling them identically is what keeps our copy of the status honest.
+ *
+ * Without this, dispute_status froze at whatever it was the moment the
+ * dispute opened: a dispute won months ago still reads
+ * 'warning_needs_response' forever, which is worse than not recording it
+ * at all because it looks actionable.
+ *
+ * CHOSEN BEHAVIOUR:
+ *
+ *  • Status is written on every delivery, so intermediate transitions
+ *    (needs_response -> under_review) stay accurate — silently.
+ *  • Admins are alerted ONLY on a terminal outcome (won/lost), and only on
+ *    the transition into it. Alerting on every intermediate update would
+ *    train admins to ignore the one that decides whether RoyalPal just
+ *    lost the money.
+ *  • The tutor is still never touched — no reversal, no debit, no
+ *    notification. Losing a dispute does not retroactively make the lesson
+ *    not have happened, and who absorbs that loss remains a business
+ *    decision rather than something a webhook decides.
+ *  • Records the dispute id even if charge.dispute.created was missed or
+ *    never delivered, so a dispute first seen at closing time is still
+ *    captured rather than dropped.
+ */
+export async function handleChargeDisputeUpdated(dispute: Stripe.Dispute): Promise<void> {
+  const paymentIntentId = stripeId(dispute.payment_intent);
+  if (!paymentIntentId) return;
+
+  const admin = createAdminClient();
+  const { data: payment } = await admin
+    .from("payments")
+    .select("booking_id, stripe_dispute_id, dispute_status")
+    .eq("stripe_payment_intent_id", paymentIntentId)
+    .maybeSingle();
+
+  if (!payment) return; // Not one of ours — fails closed.
+
+  // Nothing changed: a redelivery, or an update to a field we don't track.
+  if (payment.stripe_dispute_id === dispute.id && payment.dispute_status === dispute.status) {
+    return;
+  }
+
+  const { error: updateError } = await admin
+    .from("payments")
+    .update({ stripe_dispute_id: dispute.id, dispute_status: dispute.status })
+    .eq("booking_id", payment.booking_id);
+
+  if (updateError) {
+    log.error("failed to update dispute status", updateError, {
+      disputeId: dispute.id,
+      bookingId: payment.booking_id,
+    });
+    throw new Error(`Could not update dispute status for booking ${payment.booking_id}`);
+  }
+
+  if (!TERMINAL_DISPUTE_STATUSES.has(dispute.status)) return;
+
+  const won = dispute.status === "won";
+  log.error("chargeback resolved", undefined, {
+    disputeId: dispute.id,
+    bookingId: payment.booking_id,
+    outcome: dispute.status,
+    amountCents: dispute.amount,
+  });
+
+  await notifyAdmins(admin, {
+    type: "dispute_resolved",
+    title: won ? "Chargeback won" : "Chargeback lost",
+    body: won
+      ? "A disputed lesson payment was resolved in RoyalPal's favour. Stripe has returned the amount to the platform balance."
+      : "A disputed lesson payment was lost. The amount and the dispute fee stay withdrawn from the platform balance — the tutor's payout was not clawed back.",
     href: "/admin/payments",
   });
 }

@@ -42,7 +42,9 @@ const {
   handleAccountUpdated,
   handleChargeRefunded,
   handleTransferReversed,
+  handleTransferCreated,
   handleChargeDisputeCreated,
+  handleChargeDisputeUpdated,
   shouldProcessEvent,
   markEventProcessed,
 } = await import("@/lib/stripe/webhook-handlers");
@@ -696,6 +698,198 @@ describe("charge.dispute.created", () => {
 
     // The dispute is still recorded even though nobody could be told.
     expect(payment().stripe_dispute_id).toBe("dp_1");
+    expect(emitMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("transfer.created — acceptance criteria 1-4", () => {
+  it("(1) records transfer_status='paid' and the transfer id for a connected tutor's lesson", async () => {
+    payoutSeed();
+
+    await handleTransferCreated(transfer());
+
+    expect(payment().transfer_status).toBe("paid");
+    expect(payment().stripe_transfer_id).toBe("tr_1");
+  });
+
+  it("(1) never notifies anyone — a payout working is not news", async () => {
+    payoutSeed();
+
+    await handleTransferCreated(transfer());
+
+    expect(emitMany).not.toHaveBeenCalled();
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("(2) arriving AFTER a reversal does not resurrect 'paid'", async () => {
+    // Stripe guarantees neither ordering nor exactly-once delivery, so a
+    // late or redelivered transfer.created can legitimately land after the
+    // reversal that followed it. Reporting money as sitting with a tutor
+    // who no longer has it would be a real ledger lie.
+    payoutSeed({ status: "succeeded", transfer_status: "reversed" });
+
+    await handleTransferCreated(transfer());
+
+    expect(payment().transfer_status).toBe("reversed");
+  });
+
+  it("(2) full out-of-order sequence: created -> reversed -> created replay settles on reversed", async () => {
+    payoutSeed({ status: "succeeded" });
+
+    await handleTransferCreated(transfer());
+    expect(payment().transfer_status).toBe("paid");
+
+    await handleTransferReversed(transfer());
+    expect(payment().transfer_status).toBe("reversed");
+
+    await handleTransferCreated(transfer()); // redelivery
+    expect(payment().transfer_status).toBe("reversed");
+  });
+
+  it("(3) ignores a transfer to an account that is not one of our tutors — no write, no alert", async () => {
+    payoutSeed();
+
+    await handleTransferCreated(transfer({ destination: "acct_someone_else" }));
+
+    expect(payment().transfer_status).toBeNull();
+    expect(payment().stripe_transfer_id).toBeUndefined();
+    expect(emitMany).not.toHaveBeenCalled();
+  });
+
+  it("(4) writes nothing when transfer_group names a booking belonging to a different tutor", async () => {
+    payoutSeed();
+    fake.db.payments[0].bookings = { tutor_id: "some-other-tutor" };
+
+    await handleTransferCreated(transfer());
+
+    expect(payment().transfer_status).toBeNull();
+    // Unlike a reversal, this is silent: nothing bad happened, the transfer
+    // simply isn't ours to record.
+    expect(emitMany).not.toHaveBeenCalled();
+  });
+
+  it("(4) writes nothing when the transfer_group is unparseable", async () => {
+    payoutSeed();
+
+    await handleTransferCreated(transfer({ transfer_group: "group_pi_3Abc" }));
+
+    expect(payment().transfer_status).toBeNull();
+    expect(emitMany).not.toHaveBeenCalled();
+  });
+
+  it("is idempotent — a duplicate delivery is a no-op", async () => {
+    payoutSeed();
+
+    await handleTransferCreated(transfer());
+    await handleTransferCreated(transfer());
+
+    expect(payment().transfer_status).toBe("paid");
+    expect(emitMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("charge.dispute.updated / closed — acceptance criteria 5-6", () => {
+  function disputeSeed(over: { disputeId?: string | null; disputeStatus?: string | null } = {}) {
+    seed({
+      profiles: [{ id: ADMIN, role: "admin" }],
+      payments: [
+        {
+          id: "p1",
+          booking_id: BOOKING,
+          stripe_payment_intent_id: "pi_1",
+          status: "succeeded",
+          stripe_dispute_id: over.disputeId === undefined ? "dp_1" : over.disputeId,
+          dispute_status:
+            over.disputeStatus === undefined ? "warning_needs_response" : over.disputeStatus,
+        },
+      ],
+    });
+  }
+
+  it("(5) alerts admins when a dispute is won", async () => {
+    disputeSeed();
+
+    await handleChargeDisputeUpdated(dispute({ status: "won" }));
+
+    expect(payment().dispute_status).toBe("won");
+    expect(emitMany).toHaveBeenCalledTimes(1);
+    const sent = emitMany.mock.calls[0][0] as Array<{ type: string; title: string }>;
+    expect(sent[0].type).toBe("dispute_resolved");
+    expect(sent[0].title).toBe("Chargeback won");
+  });
+
+  it("(5) alerts admins when a dispute is lost", async () => {
+    disputeSeed();
+
+    await handleChargeDisputeUpdated(dispute({ status: "lost" }));
+
+    expect(payment().dispute_status).toBe("lost");
+    expect((emitMany.mock.calls[0][0] as Array<{ title: string }>)[0].title).toBe(
+      "Chargeback lost",
+    );
+  });
+
+  it("(5) alerts EXACTLY once — closed following updated with the same outcome is a no-op", async () => {
+    disputeSeed();
+
+    await handleChargeDisputeUpdated(dispute({ status: "won" })); // charge.dispute.updated
+    await handleChargeDisputeUpdated(dispute({ status: "won" })); // charge.dispute.closed
+
+    expect(emitMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("(6) an intermediate status change is recorded silently", async () => {
+    disputeSeed();
+
+    await handleChargeDisputeUpdated(dispute({ status: "under_review" }));
+
+    expect(payment().dispute_status).toBe("under_review");
+    expect(emitMany).not.toHaveBeenCalled();
+  });
+
+  it("(6) warning_closed is not treated as an outcome (it closes an early warning, not a dispute)", async () => {
+    disputeSeed();
+
+    await handleChargeDisputeUpdated(dispute({ status: "warning_closed" }));
+
+    expect(payment().dispute_status).toBe("warning_closed");
+    expect(emitMany).not.toHaveBeenCalled();
+  });
+
+  it("never touches the tutor — no reversal, no debit, no notification", async () => {
+    disputeSeed();
+
+    await handleChargeDisputeUpdated(dispute({ status: "lost" }));
+
+    expect(emit).not.toHaveBeenCalled();
+    expect(payment().transfer_status).toBeUndefined();
+    expect(payment().status).toBe("succeeded");
+  });
+
+  it("records a dispute first seen at closing time (created was missed or never delivered)", async () => {
+    disputeSeed({ disputeId: null, disputeStatus: null });
+
+    await handleChargeDisputeUpdated(dispute({ status: "lost" }));
+
+    expect(payment().stripe_dispute_id).toBe("dp_1");
+    expect(payment().dispute_status).toBe("lost");
+  });
+
+  it("ignores a dispute for a charge that is not ours (shared Stripe account)", async () => {
+    disputeSeed();
+
+    await handleChargeDisputeUpdated(dispute({ payment_intent: "pi_lingora", status: "lost" }));
+
+    expect(payment().dispute_status).toBe("warning_needs_response");
+    expect(emitMany).not.toHaveBeenCalled();
+  });
+
+  it("ignores a dispute carrying no payment_intent", async () => {
+    disputeSeed();
+
+    await expect(
+      handleChargeDisputeUpdated(dispute({ payment_intent: null, status: "lost" })),
+    ).resolves.toBeUndefined();
     expect(emitMany).not.toHaveBeenCalled();
   });
 });

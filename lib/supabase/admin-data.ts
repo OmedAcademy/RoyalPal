@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import type {
   BookingStatus,
   PaymentStatus,
+  TransferStatus,
   TutorVerificationStatus,
   UserRole,
 } from "@/types/database";
@@ -314,6 +315,10 @@ export type AdminPaymentRow = {
   status: PaymentStatus;
   created_at: string;
   paid_at: string | null;
+  // Payout and dispute state (migration 0024, written by the Stripe webhook
+  // handlers). Surfaced here so the data isn't write-only.
+  transfer_status: TransferStatus | null;
+  dispute_status: string | null;
   booking: { subject_name: string; student_name: string; tutor_name: string } | null;
 };
 
@@ -327,6 +332,8 @@ export async function listPayments(): Promise<AdminPaymentRow[]> {
     status: PaymentStatus;
     created_at: string;
     paid_at: string | null;
+    transfer_status: TransferStatus | null;
+    dispute_status: string | null;
     bookings: {
       student: { full_name: string } | null;
       tutor_profiles: { profiles: { full_name: string } | null } | null;
@@ -336,7 +343,7 @@ export async function listPayments(): Promise<AdminPaymentRow[]> {
   const { data } = await admin
     .from("payments")
     .select(
-      "id, booking_id, amount_cents, currency, status, created_at, paid_at, bookings(student:profiles!bookings_student_id_fkey(full_name), tutor_profiles!bookings_tutor_id_fkey(profiles!tutor_profiles_id_fkey(full_name)), subjects(name))",
+      "id, booking_id, amount_cents, currency, status, created_at, paid_at, transfer_status, dispute_status, bookings(student:profiles!bookings_student_id_fkey(full_name), tutor_profiles!bookings_tutor_id_fkey(profiles!tutor_profiles_id_fkey(full_name)), subjects(name))",
     )
     .order("created_at", { ascending: false })
     .limit(100)
@@ -350,6 +357,8 @@ export async function listPayments(): Promise<AdminPaymentRow[]> {
     status: r.status,
     created_at: r.created_at,
     paid_at: r.paid_at,
+    transfer_status: r.transfer_status,
+    dispute_status: r.dispute_status,
     booking: r.bookings
       ? {
           subject_name: r.bookings.subjects?.name ?? "Lesson",

@@ -6,7 +6,9 @@ import { logger, newRequestId } from "@/lib/observability/logger";
 import {
   handleAccountUpdated,
   handleChargeDisputeCreated,
+  handleChargeDisputeUpdated,
   handleChargeRefunded,
+  handleTransferCreated,
   handleTransferReversed,
   handleCheckoutSessionCompleted,
   handleCheckoutSessionExpired,
@@ -97,6 +99,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         break;
       case "charge.dispute.created":
         await handleChargeDisputeCreated(event.data.object);
+        break;
+      // Both carry the same Dispute object and differ only in timing, so
+      // they share a handler — that is what keeps our copy of the status
+      // from freezing at whatever it was when the dispute opened.
+      case "charge.dispute.updated":
+      case "charge.dispute.closed":
+        await handleChargeDisputeUpdated(event.data.object);
+        break;
+      case "transfer.created":
+        await handleTransferCreated(event.data.object);
         break;
       // Not transfer.failed: that event does not exist in this API version.
       // See handleTransferReversed for what actually covers the "money left

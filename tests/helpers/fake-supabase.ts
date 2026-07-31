@@ -33,6 +33,8 @@ class Query implements PromiseLike<Result<Row[]>> {
   // a same-named boolean field and leave it permanently truthy — making
   // every query, including multi-row ones, return a single row.
   private wantsSingle = false;
+  private sorts: [string, boolean][] = [];
+  private rowLimit: number | null = null;
 
   constructor(
     private rows: Row[],
@@ -55,6 +57,26 @@ class Query implements PromiseLike<Result<Row[]>> {
    * payment" guard in startCheckout. */
   neq(column: string, value: unknown): this {
     this.negativeFilters.push([column, value]);
+    return this;
+  }
+
+  /** Real sort, not a no-op: a fake that silently ignores ordering would
+   * let a test claim coverage of behaviour it never exercised. */
+  order(column: string, opts?: { ascending?: boolean }): this {
+    const ascending = opts?.ascending ?? true;
+    this.sorts.push([column, ascending]);
+    return this;
+  }
+
+  /** Real truncation, for the same reason. */
+  limit(count: number): this {
+    this.rowLimit = count;
+    return this;
+  }
+
+  /** supabase-js `.returns<T>()` is a pure TypeScript assertion with no
+   * runtime effect, so identity is the faithful implementation. */
+  returns(): this {
     return this;
   }
 
@@ -87,7 +109,23 @@ class Query implements PromiseLike<Result<Row[]>> {
     }
 
     if (this.op === "select") {
-      const found = this.rows.filter((r) => this.matches(r));
+      let found = this.rows.filter((r) => this.matches(r));
+
+      for (const [column, ascending] of [...this.sorts].reverse()) {
+        found = [...found].sort((a, b) => {
+          const x = a[column];
+          const y = b[column];
+          if (x === y) return 0;
+          // Nulls last regardless of direction, matching PostgREST's
+          // nullsFirst: false default.
+          if (x == null) return 1;
+          if (y == null) return -1;
+          return (x < y ? -1 : 1) * (ascending ? 1 : -1);
+        });
+      }
+
+      if (this.rowLimit !== null) found = found.slice(0, this.rowLimit);
+
       return this.wantsSingle
         ? { data: found[0] ?? null, error: null }
         : { data: found, error: null };
