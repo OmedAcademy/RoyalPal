@@ -76,6 +76,7 @@ function seed(
     trialPrice?: number | null;
     user?: string | null;
     chargesEnabled?: boolean;
+    feeBps?: number | null;
   } = {},
 ) {
   fake = createFakeSupabase(
@@ -91,6 +92,7 @@ function seed(
           // Connect gating existed) keeps exercising standard bookings
           // without needing to know about Stripe Connect at all.
           stripe_charges_enabled: opts.chargesEnabled ?? true,
+          platform_fee_bps: opts.feeBps ?? null,
         },
       ],
       tutor_subjects: [{ tutor_id: TUTOR, subject_id: 1 }],
@@ -179,14 +181,30 @@ describe("createBooking — input validation", () => {
 });
 
 describe("createBooking — server-derived pricing", () => {
-  it("uses the tutor's stored hourly rate and a 15% platform fee", async () => {
+  it("uses the tutor's stored hourly rate and the default 10% platform fee", async () => {
     await captureRedirect(() => createBooking({}, form()));
 
     const booking = fake.db.bookings[0];
     expect(booking.price_cents).toBe(5000);
-    expect(booking.platform_fee_cents).toBe(750);
+    expect(booking.platform_fee_cents).toBe(500);
     expect(booking.currency).toBe("usd");
     expect(booking.status).toBeUndefined(); // DB default: pending_payment
+  });
+
+  it("honours a tutor's negotiated commission override", async () => {
+    seed({ feeBps: 500 }); // 5%
+
+    await captureRedirect(() => createBooking({}, form()));
+
+    expect(fake.db.bookings[0].platform_fee_cents).toBe(250);
+  });
+
+  it("charges nothing to a zero-commission tutor", async () => {
+    seed({ feeBps: 0 });
+
+    await captureRedirect(() => createBooking({}, form()));
+
+    expect(fake.db.bookings[0].platform_fee_cents).toBe(0);
   });
 
   it("uses the trial price for a trial lesson", async () => {
@@ -205,7 +223,7 @@ describe("createBooking — server-derived pricing", () => {
     );
 
     expect(fake.db.bookings[0].price_cents).toBe(5000);
-    expect(fake.db.bookings[0].platform_fee_cents).toBe(750);
+    expect(fake.db.bookings[0].platform_fee_cents).toBe(500);
   });
 
   it("records the student as the caller, not any client-supplied id", async () => {
@@ -247,7 +265,7 @@ describe("createBooking — Connect destination-charge plumbing", () => {
     await captureRedirect(() => createBooking({}, form()));
 
     const args = createCheckout.mock.calls[0][0];
-    expect(args.platformFeeCents).toBe(750);
+    expect(args.platformFeeCents).toBe(500);
     expect(args.tutorStripeAccountId).toBe("acct_tutor_1");
   });
 

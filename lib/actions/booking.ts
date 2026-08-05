@@ -15,6 +15,7 @@ import {
 import { NotificationService } from "@/lib/notifications/service";
 import { MeetingService } from "@/lib/meet/service";
 import { logger } from "@/lib/observability/logger";
+import { platformFeeCents, resolvePlatformFeeBps } from "@/lib/pricing/commission";
 import type { Database } from "@/types/database";
 
 export type BookingActionState = {
@@ -172,7 +173,7 @@ export async function createBooking(
   const { data: tutorProfile } = await supabase
     .from("tutor_profiles")
     .select(
-      "hourly_rate_cents, trial_price_cents, currency, verification_status, stripe_charges_enabled",
+      "hourly_rate_cents, trial_price_cents, currency, verification_status, stripe_charges_enabled, platform_fee_bps",
     )
     .eq("id", tutorId)
     .maybeSingle();
@@ -221,7 +222,14 @@ export async function createBooking(
   // from client input — the form only ever sends tutorId/subjectId/time.
   const priceCents =
     lessonType === "trial" ? tutorProfile.trial_price_cents! : tutorProfile.hourly_rate_cents;
-  const platformFeeCents = Math.round(priceCents * 0.15);
+  // Commission is resolved server-side per booking: the tutor's negotiated
+  // rate if they have one, else the deployment rate, else the product
+  // default. Snapshotted onto the booking row so a later rate change never
+  // retroactively alters what an already-agreed lesson paid out.
+  const feeCents = platformFeeCents(
+    priceCents,
+    resolvePlatformFeeBps(tutorProfile.platform_fee_bps),
+  );
 
   const { data: booking, error: insertError } = await supabase
     .from("bookings")
@@ -233,7 +241,7 @@ export async function createBooking(
       end_at: endDate.toISOString(),
       lesson_duration_minutes: durationMinutes,
       price_cents: priceCents,
-      platform_fee_cents: platformFeeCents,
+      platform_fee_cents: feeCents,
       currency: tutorProfile.currency,
     })
     .select(

@@ -98,6 +98,9 @@ export interface Database {
           total_reviews: number;
           stripe_account_id: string | null;
           stripe_charges_enabled: boolean;
+          /** Per-tutor commission override in basis points (migration 0025).
+           * Null = use the platform rate. See lib/pricing/commission.ts. */
+          platform_fee_bps: number | null;
           created_at: string;
           updated_at: string;
         };
@@ -121,6 +124,7 @@ export interface Database {
           total_reviews?: number;
           stripe_account_id?: string | null;
           stripe_charges_enabled?: boolean;
+          platform_fee_bps?: number | null;
           created_at?: string;
           updated_at?: string;
         };
