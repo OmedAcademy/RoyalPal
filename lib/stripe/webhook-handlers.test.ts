@@ -45,6 +45,8 @@ const {
   handleTransferCreated,
   handleChargeDisputeCreated,
   handleChargeDisputeUpdated,
+  handlePayoutFailed,
+  handlePayoutPaid,
   shouldProcessEvent,
   markEventProcessed,
 } = await import("@/lib/stripe/webhook-handlers");
@@ -891,5 +893,202 @@ describe("charge.dispute.updated / closed — acceptance criteria 5-6", () => {
       handleChargeDisputeUpdated(dispute({ payment_intent: null, status: "lost" })),
     ).resolves.toBeUndefined();
     expect(emitMany).not.toHaveBeenCalled();
+  });
+});
+
+const richAccount = (over: Record<string, unknown> = {}) =>
+  ({
+    id: ACCT,
+    metadata: { app: "royalpal", tutor_id: TUTOR },
+    charges_enabled: false,
+    payouts_enabled: false,
+    details_submitted: false,
+    requirements: { currently_due: [], past_due: [], disabled_reason: null },
+    ...over,
+  }) as unknown as Stripe.Account;
+
+function accountSeed(over: Record<string, unknown> = {}) {
+  seed({
+    profiles: [{ id: ADMIN, role: "admin" }],
+    tutor_profiles: [
+      {
+        id: TUTOR,
+        stripe_account_id: ACCT,
+        stripe_charges_enabled: false,
+        stripe_payouts_enabled: false,
+        stripe_details_submitted: false,
+        stripe_disabled_reason: null,
+        ...over,
+      },
+    ],
+  });
+}
+
+const tutorRow = () => fake.db.tutor_profiles[0];
+
+describe("account.updated — full Connect state", () => {
+  it("mirrors payouts_enabled and details_submitted, not just charges_enabled", async () => {
+    accountSeed();
+
+    await handleAccountUpdated(
+      richAccount({ charges_enabled: true, payouts_enabled: true, details_submitted: true }),
+    );
+
+    expect(tutorRow().stripe_charges_enabled).toBe(true);
+    expect(tutorRow().stripe_payouts_enabled).toBe(true);
+    expect(tutorRow().stripe_details_submitted).toBe(true);
+  });
+
+  it("keeps charges_enabled and payouts_enabled independent", async () => {
+    // A real state, not a hypothetical: the tutor is bookable and earning,
+    // but bank payouts are paused so money piles up in their Stripe balance.
+    // Collapsing these two into one flag would either block a bookable tutor
+    // or imply they are being paid when they are not.
+    accountSeed();
+
+    await handleAccountUpdated(
+      richAccount({ charges_enabled: true, payouts_enabled: false, details_submitted: true }),
+    );
+
+    expect(tutorRow().stripe_charges_enabled).toBe(true);
+    expect(tutorRow().stripe_payouts_enabled).toBe(false);
+  });
+
+  it("merges currently_due and past_due requirements", async () => {
+    accountSeed();
+
+    await handleAccountUpdated(
+      richAccount({
+        requirements: {
+          currently_due: ["individual.id_number"],
+          past_due: ["individual.verification.document"],
+          disabled_reason: "requirements.past_due",
+        },
+      }),
+    );
+
+    expect(tutorRow().stripe_requirements_due).toEqual([
+      "individual.id_number",
+      "individual.verification.document",
+    ]);
+    expect(tutorRow().stripe_disabled_reason).toBe("requirements.past_due");
+  });
+
+  it("de-duplicates a requirement appearing in both lists", async () => {
+    accountSeed();
+
+    await handleAccountUpdated(
+      richAccount({
+        requirements: {
+          currently_due: ["individual.id_number"],
+          past_due: ["individual.id_number"],
+          disabled_reason: null,
+        },
+      }),
+    );
+
+    expect(tutorRow().stripe_requirements_due).toEqual(["individual.id_number"]);
+  });
+
+  it("notifies a tutor whose account becomes newly restricted", async () => {
+    accountSeed({ stripe_charges_enabled: true });
+
+    await handleAccountUpdated(
+      richAccount({ charges_enabled: true, requirements: { disabled_reason: "under_review" } }),
+    );
+
+    expect(emit).toHaveBeenCalledTimes(1);
+    expect(emit.mock.calls[0][0]).toMatchObject({
+      userId: TUTOR,
+      type: "payouts_action_required",
+    });
+  });
+
+  it("does not re-notify while an account stays restricted", async () => {
+    accountSeed({ stripe_disabled_reason: "under_review" });
+
+    await handleAccountUpdated(
+      richAccount({ details_submitted: true, requirements: { disabled_reason: "under_review" } }),
+    );
+
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("sends the activation notice only on the false->true transition", async () => {
+    accountSeed({ stripe_charges_enabled: true });
+
+    // charges_enabled was ALREADY true; only payouts_enabled changed.
+    await handleAccountUpdated(richAccount({ charges_enabled: true, payouts_enabled: true }));
+
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("is a no-op when nothing we mirror actually changed", async () => {
+    accountSeed({ stripe_charges_enabled: true, stripe_payouts_enabled: true });
+
+    await handleAccountUpdated(richAccount({ charges_enabled: true, payouts_enabled: true }));
+
+    expect(emit).not.toHaveBeenCalled();
+  });
+});
+
+const payout = (over: Partial<Stripe.Payout> = {}) =>
+  ({
+    id: "po_1",
+    amount: 12_500,
+    currency: "usd",
+    failure_message: "Bank account closed",
+    failure_code: "account_closed",
+    ...over,
+  }) as unknown as Stripe.Payout;
+
+describe("payout.failed / payout.paid", () => {
+  it("notifies the tutor AND admins when a bank payout fails", async () => {
+    accountSeed();
+
+    await handlePayoutFailed(payout(), ACCT);
+
+    expect(emit).toHaveBeenCalledTimes(1);
+    expect(emit.mock.calls[0][0]).toMatchObject({ userId: TUTOR, type: "payout_failed" });
+    expect(emitMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a payout for an account that is not one of our tutors", async () => {
+    accountSeed();
+
+    await handlePayoutFailed(payout(), "acct_someone_else");
+
+    expect(emit).not.toHaveBeenCalled();
+    expect(emitMany).not.toHaveBeenCalled();
+  });
+
+  it("ignores a PLATFORM payout, which carries no connected account", async () => {
+    // RoyalPal's own balance paying out to RoyalPal's bank is not a tutor
+    // event and must never reach a tutor's notifications.
+    accountSeed();
+
+    await handlePayoutFailed(payout(), undefined);
+
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("payout.paid is silent — a payout working is not news", async () => {
+    accountSeed();
+
+    await handlePayoutPaid(payout(), ACCT);
+
+    expect(emit).not.toHaveBeenCalled();
+    expect(emitMany).not.toHaveBeenCalled();
+  });
+
+  it("does not touch any payment row — payouts batch many lessons", async () => {
+    accountSeed();
+
+    await handlePayoutFailed(payout(), ACCT);
+
+    // There is no single booking a payout belongs to, so nothing per-booking
+    // may be written from this path — the seeded payment must be untouched.
+    expect(payment().status).toBe("requires_payment");
+    expect(payment().transfer_status).toBeUndefined();
   });
 });

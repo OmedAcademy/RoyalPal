@@ -351,6 +351,16 @@ export async function handleCheckoutSessionExpired(
   }
 }
 
+/** Order-insensitive comparison of two requirement lists. Stripe does not
+ * promise a stable order, so a plain join/equality check would report a
+ * change on every delivery and defeat the no-op guard entirely. */
+function sameRequirements(a: string[], b: string[] | null | undefined): boolean {
+  const other = b ?? [];
+  if (a.length !== other.length) return false;
+  const set = new Set(other);
+  return a.every((item) => set.has(item));
+}
+
 /**
  * Syncs tutor_profiles.stripe_charges_enabled from the connected Account's
  * actual Stripe-verified state. This is the ONLY thing that flips it —
@@ -369,7 +379,7 @@ export async function handleAccountUpdated(account: Stripe.Account): Promise<voi
   const { data: tutorProfile, error: lookupError } = await admin
     .from("tutor_profiles")
     .select(
-      "id, stripe_charges_enabled, stripe_payouts_enabled, stripe_details_submitted, stripe_disabled_reason",
+      "id, stripe_charges_enabled, stripe_payouts_enabled, stripe_details_submitted, stripe_requirements_due, stripe_disabled_reason",
     )
     .eq("stripe_account_id", account.id)
     .maybeSingle();
@@ -399,11 +409,18 @@ export async function handleAccountUpdated(account: Stripe.Account): Promise<voi
     ...(account.requirements?.past_due ?? []),
   ];
 
+  const deduped = Array.from(new Set(requirementsDue));
+
   const unchanged =
     chargesEnabled === tutorProfile.stripe_charges_enabled &&
     payoutsEnabled === tutorProfile.stripe_payouts_enabled &&
     detailsSubmitted === tutorProfile.stripe_details_submitted &&
-    disabledReason === tutorProfile.stripe_disabled_reason;
+    disabledReason === tutorProfile.stripe_disabled_reason &&
+    // Requirements must be part of this comparison. Stripe routinely adds a
+    // newly-required document WITHOUT flipping any of the booleans above —
+    // and the restricted UI renders this exact list, so skipping the write
+    // would leave a tutor staring at a stale set of things to provide.
+    sameRequirements(deduped, tutorProfile.stripe_requirements_due);
 
   if (unchanged) {
     // account.updated fires repeatedly as onboarding progresses — often for
@@ -412,9 +429,12 @@ export async function handleAccountUpdated(account: Stripe.Account): Promise<voi
     return;
   }
 
-  // Whether the tutor is newly able to earn, used for the notification
-  // below. Captured before the write so it reflects an actual transition.
+  // BOTH transition flags are captured BEFORE the write. tutorProfile is the
+  // row we just read, and reading either value back after the update would
+  // compare the new state against itself — the notification would then never
+  // fire, silently.
   const becameActive = chargesEnabled && !tutorProfile.stripe_charges_enabled;
+  const becameRestricted = Boolean(disabledReason) && !tutorProfile.stripe_disabled_reason;
 
   const { error: updateError } = await admin
     .from("tutor_profiles")
@@ -422,7 +442,7 @@ export async function handleAccountUpdated(account: Stripe.Account): Promise<voi
       stripe_charges_enabled: chargesEnabled,
       stripe_payouts_enabled: payoutsEnabled,
       stripe_details_submitted: detailsSubmitted,
-      stripe_requirements_due: Array.from(new Set(requirementsDue)),
+      stripe_requirements_due: deduped,
       stripe_disabled_reason: disabledReason,
     })
     .eq("id", tutorProfile.id);
@@ -450,7 +470,7 @@ export async function handleAccountUpdated(account: Stripe.Account): Promise<voi
   // cannot earn until they resolve it, and they will not find out unless
   // told. A newly-restricted account is the one account.updated transition
   // that genuinely needs to interrupt someone.
-  if (disabledReason && !tutorProfile.stripe_disabled_reason) {
+  if (becameRestricted) {
     log.error("connect account restricted", undefined, {
       tutorId: tutorProfile.id,
       accountId: account.id,

@@ -27,8 +27,12 @@ const handleTransferCreated = vi.fn();
 const shouldProcessEvent = vi.fn();
 const markEventProcessed = vi.fn();
 
+// isStripeConfigured defaults true; individual tests flip it to prove the
+// route names a missing secret key rather than blaming Stripe's signature.
+let stripeConfigured = true;
 vi.mock("@/lib/stripe/client", () => ({
   getStripe: () => ({ webhooks: { constructEvent } }),
+  isStripeConfigured: () => stripeConfigured,
 }));
 
 vi.mock("@/lib/stripe/webhook-handlers", () => ({
@@ -204,5 +208,35 @@ describe("idempotency ledger", () => {
     await POST(signed("checkout.session.completed"));
 
     expect(markEventProcessed).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("configuration guards", () => {
+  it("returns 500 for a missing SECRET key, not a 400 blaming Stripe's signature", async () => {
+    // Without the guard, getStripe() throws inside the signature try/catch
+    // and the endpoint answers "signature verification failed" — sending
+    // whoever debugs it hunting for a Stripe problem that does not exist.
+    stripeConfigured = false;
+    try {
+      const res = await POST(request("{}", { "stripe-signature": "sig" }));
+
+      expect(res.status).toBe(500);
+      expect(constructEvent).not.toHaveBeenCalled();
+      expect(shouldProcessEvent).not.toHaveBeenCalled();
+    } finally {
+      stripeConfigured = true;
+    }
+  });
+
+  it("still rejects an unsigned request before looking at configuration", async () => {
+    // Ordering matters: an unsigned request is a bad request regardless of
+    // how this deployment is configured.
+    stripeConfigured = false;
+    try {
+      const res = await POST(request("{}"));
+      expect(res.status).toBe(400);
+    } finally {
+      stripeConfigured = true;
+    }
   });
 });

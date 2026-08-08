@@ -1,7 +1,7 @@
 import "server-only";
 import { NextResponse, type NextRequest } from "next/server";
 import type Stripe from "stripe";
-import { getStripe } from "@/lib/stripe/client";
+import { getStripe, isStripeConfigured } from "@/lib/stripe/client";
 import { logger, newRequestId } from "@/lib/observability/logger";
 import {
   handleAccountUpdated,
@@ -42,6 +42,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!webhookSecret) {
     console.error("[stripe webhook] STRIPE_WEBHOOK_SECRET is not configured");
     return NextResponse.json({ error: "Webhook not configured" }, { status: 500 });
+  }
+
+  // The SECRET KEY is a second, separate way this endpoint can be
+  // misconfigured. Without this guard getStripe() throws inside the
+  // signature try/catch below and we answer 400 "signature verification
+  // failed" — blaming Stripe for our own unset env var, which is the exact
+  // misleading-error trap the webhook-secret guard above exists to avoid.
+  if (!isStripeConfigured()) {
+    console.error("[stripe webhook] STRIPE_SECRET_KEY is not configured");
+    return NextResponse.json({ error: "Stripe not configured" }, { status: 500 });
   }
 
   const rawBody = await request.text();

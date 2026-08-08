@@ -8,11 +8,18 @@
 -- A tutor told "onboarding incomplete" when Stripe actually wants a new ID
 -- document will retry the same flow forever. These columns are what let the
 -- UI say the true thing.
+--
+-- WRITTEN IDEMPOTENTLY, unlike 0024/0025. Those were applied through a
+-- migration runner in one shot; this one is expected to be pasted into the
+-- Supabase SQL editor, where a failure partway through leaves the columns
+-- created but the index missing — and a non-idempotent re-run then errors
+-- on the columns, stranding the operator with a half-applied schema and no
+-- clean way forward. `if not exists` makes finishing the job the easy path.
 alter table public.tutor_profiles
-  add column stripe_payouts_enabled boolean not null default false,
-  add column stripe_details_submitted boolean not null default false,
-  add column stripe_requirements_due text[] not null default '{}',
-  add column stripe_disabled_reason text;
+  add column if not exists stripe_payouts_enabled boolean not null default false,
+  add column if not exists stripe_details_submitted boolean not null default false,
+  add column if not exists stripe_requirements_due text[] not null default '{}',
+  add column if not exists stripe_disabled_reason text;
 
 -- Note the deliberate split between charges_enabled and payouts_enabled.
 -- They are NOT the same flag: an account can accept charges (so lessons are
@@ -23,7 +30,7 @@ alter table public.tutor_profiles
 
 -- Operational queue: accounts Stripe is actively blocking. Partial index
 -- stays small — in normal operation this set is empty.
-create index tutor_profiles_stripe_restricted_idx
+create index if not exists tutor_profiles_stripe_restricted_idx
   on public.tutor_profiles (id)
   where stripe_disabled_reason is not null;
 

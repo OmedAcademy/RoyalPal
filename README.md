@@ -6,6 +6,13 @@ A global tutoring marketplace — students discover tutors, book and pay for les
 
 ---
 
+> **Payments status:** Stripe Connect Express is code-complete and unit-tested
+> but has **never run against real Stripe** — no keys are configured. The app
+> degrades gracefully without them (payment paths decline with a clear reason;
+> everything else works). Migration `0026` is also **not yet applied** to the
+> remote database. See [`docs/STRIPE_STATUS.md`](docs/STRIPE_STATUS.md) before
+> touching anything payment-related.
+
 ## Stack
 
 | Layer     | Choice                                                     |
