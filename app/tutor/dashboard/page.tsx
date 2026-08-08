@@ -9,6 +9,8 @@ import { Card, StatTile } from "@/components/ui/Card";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { LessonRow } from "@/components/dashboard/LessonRow";
 import { ButtonLink } from "@/components/ui/Button";
+import { PayoutStatusBanner } from "@/components/tutor/PayoutStatusBanner";
+import { isStripeConfigured } from "@/lib/stripe/client";
 import type { ReviewWithAuthor } from "@/lib/supabase/reviews";
 
 const VERIFICATION_BADGE: Record<string, string> = {
@@ -79,6 +81,10 @@ export default async function TutorDashboardPage() {
           </span>
         )}
       </div>
+
+      {tutorProfile && (
+        <PayoutStatusBanner stripeConfigured={isStripeConfigured()} account={tutorProfile} />
+      )}
 
       {/* Profile setup prompt */}
       {!tutorProfile && (

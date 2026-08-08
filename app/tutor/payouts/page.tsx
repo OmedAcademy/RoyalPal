@@ -1,6 +1,7 @@
 import { requireProfile } from "@/lib/supabase/queries";
 import { createClient } from "@/lib/supabase/server";
 import { isStripeConfigured } from "@/lib/stripe/client";
+import { hasPausedBankPayouts, resolvePayoutStatus } from "@/lib/stripe/account-status";
 import { Card } from "@/components/ui/Card";
 import { ConnectOnboardingButton } from "@/components/tutor/ConnectOnboardingButton";
 import { StripeDashboardButton } from "@/components/tutor/StripeDashboardButton";
@@ -15,32 +16,6 @@ import { StripeDashboardButton } from "@/components/tutor/StripeDashboardButton"
  * mirrors from Stripe — never from the return redirect, which fires before
  * Stripe has necessarily finished verifying anything.
  */
-
-type PayoutStatus =
-  | "unconfigured" // the deployment has no Stripe credentials at all
-  | "not_connected" // tutor has never started onboarding
-  | "incomplete" // started, but Stripe still wants details
-  | "restricted" // Stripe actively blocked the account
-  | "verifying" // details submitted, Stripe still reviewing
-  | "active"; // charges enabled
-function resolveStatus(
-  configured: boolean,
-  p: {
-    stripe_account_id: string | null;
-    stripe_charges_enabled: boolean;
-    stripe_details_submitted: boolean;
-    stripe_disabled_reason: string | null;
-  } | null,
-): PayoutStatus {
-  if (!configured) return "unconfigured";
-  if (!p?.stripe_account_id) return "not_connected";
-  // Restriction outranks everything: an account can be charges_enabled and
-  // still be restricted for a future deadline, and that needs saying.
-  if (p.stripe_disabled_reason) return "restricted";
-  if (p.stripe_charges_enabled) return "active";
-  if (p.stripe_details_submitted) return "verifying";
-  return "incomplete";
-}
 
 /** Stripe's requirement keys are machine-readable ("individual.id_number");
  * this makes them merely unpleasant rather than incomprehensible. Deliberately
@@ -71,7 +46,7 @@ export default async function TutorPayoutsPage({
     .eq("id", profile.id)
     .maybeSingle();
 
-  const status = resolveStatus(isStripeConfigured(), tutorProfile);
+  const status = resolvePayoutStatus(isStripeConfigured(), tutorProfile);
   const requirements = tutorProfile?.stripe_requirements_due ?? [];
 
   return (
@@ -111,7 +86,7 @@ export default async function TutorPayoutsPage({
               Your payouts are active — lesson earnings are transferred to your account
               automatically after each payment.
             </p>
-            {!tutorProfile?.stripe_payouts_enabled && (
+            {hasPausedBankPayouts(tutorProfile) && (
               // charges_enabled and payouts_enabled are genuinely separate:
               // you can be earning while bank payouts are paused.
               <p className="text-sm text-amber-700 dark:text-amber-400">
