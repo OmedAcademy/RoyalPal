@@ -35,6 +35,13 @@ vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => fake.client })
 vi.mock("@/lib/notifications/service", () => ({
   NotificationService: { emit: (...a: unknown[]) => emit(...a) },
 }));
+// Mocked rather than stubbing STRIPE_SECRET_KEY: no key-shaped placeholder
+// belongs in a committed file, and the behaviour under test is the action's
+// branching, not env parsing. Flip `stripeConfigured` to exercise the
+// unconfigured path.
+let stripeConfigured = true;
+vi.mock("@/lib/stripe/client", () => ({ isStripeConfigured: () => stripeConfigured }));
+
 vi.mock("@/lib/stripe/checkout", () => ({
   createBookingCheckoutSession: (...a: unknown[]) => createCheckout(...a),
 }));
@@ -109,6 +116,7 @@ function seed(
 }
 
 beforeEach(() => {
+  stripeConfigured = true;
   seed();
   emit.mockClear();
   createCheckout.mockReset();
@@ -479,5 +487,46 @@ describe("suspended accounts (authorization)", () => {
 
     expect(res.error).toBe("Your account is suspended. Please contact support.");
     expect(fake.db.bookings[0].status).toBe("confirmed");
+  });
+});
+
+describe("graceful degradation when Stripe is not configured", () => {
+  it("refuses to create a booking, and creates NO row to clean up later", async () => {
+    stripeConfigured = false;
+
+    const res = await createBooking({}, form());
+
+    expect(res.error).toBe("Booking is temporarily unavailable. Please try again later.");
+    // The guard runs before the insert precisely so there is no orphan
+    // pending_payment booking to cancel afterwards.
+    expect(fake.db.bookings).toHaveLength(0);
+    expect(createCheckout).not.toHaveBeenCalled();
+  });
+
+  it("refuses to retry payment", async () => {
+    stripeConfigured = false;
+    const fd = new FormData();
+    fd.set("bookingId", BOOKING);
+
+    const res = await retryBookingPayment({}, fd);
+
+    expect(res.error).toBe("Payment is temporarily unavailable. Please try again later.");
+    expect(createCheckout).not.toHaveBeenCalled();
+  });
+
+  it("still allows cancelling — nothing about it touches Stripe", async () => {
+    fake.db.bookings.push({
+      id: BOOKING,
+      student_id: STUDENT,
+      tutor_id: TUTOR,
+      status: "confirmed",
+    });
+    stripeConfigured = false;
+    const fd = new FormData();
+    fd.set("bookingId", BOOKING);
+
+    const res = await cancelBooking({}, fd);
+
+    expect(res.message).toBe("Booking cancelled");
   });
 });

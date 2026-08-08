@@ -19,11 +19,20 @@ const TUTOR = "11111111-1111-4111-8111-111111111111";
 let fake: ReturnType<typeof createFakeSupabase>;
 const createExpressAccount = vi.fn();
 const createOnboardingLink = vi.fn();
+const createDashboardLink = vi.fn();
 
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => fake.client }));
+// Mocked rather than stubbing STRIPE_SECRET_KEY: no key-shaped placeholder
+// belongs in a committed file, and the behaviour under test is the action's
+// branching, not env parsing. Flip `stripeConfigured` to exercise the
+// unconfigured path.
+let stripeConfigured = true;
+vi.mock("@/lib/stripe/client", () => ({ isStripeConfigured: () => stripeConfigured }));
+
 vi.mock("@/lib/stripe/connect", () => ({
   createExpressAccount: (...a: unknown[]) => createExpressAccount(...a),
   createOnboardingLink: (...a: unknown[]) => createOnboardingLink(...a),
+  createDashboardLink: (...a: unknown[]) => createDashboardLink(...a),
 }));
 vi.mock("next/navigation", () => ({
   redirect: (url: string) => {
@@ -31,7 +40,7 @@ vi.mock("next/navigation", () => ({
   },
 }));
 
-const { startTutorOnboarding } = await import("@/lib/actions/stripe-connect");
+const { startTutorOnboarding, openStripeDashboard } = await import("@/lib/actions/stripe-connect");
 
 /** Runs an action that ends in redirect(), returning the redirect target. */
 async function captureRedirect(fn: () => Promise<unknown>): Promise<string | null> {
@@ -79,11 +88,14 @@ function seed(
 }
 
 beforeEach(() => {
+  stripeConfigured = true;
   seed();
   createExpressAccount.mockReset();
   createOnboardingLink.mockReset();
   createExpressAccount.mockResolvedValue("acct_new");
   createOnboardingLink.mockResolvedValue("https://connect.stripe.test/setup/acct_new");
+  createDashboardLink.mockReset();
+  createDashboardLink.mockResolvedValue("https://connect.stripe.test/express/acct_x");
 });
 
 describe("startTutorOnboarding — authorization", () => {
@@ -175,5 +187,79 @@ describe("startTutorOnboarding — failure isolation", () => {
     // a retry reuses it via the "existing account" path above rather than
     // creating a second one.
     expect(fake.db.tutor_profiles[0].stripe_account_id).toBe("acct_new");
+  });
+});
+
+describe("graceful degradation when Stripe is not configured", () => {
+  it("startTutorOnboarding reports the real reason instead of a Stripe failure", async () => {
+    stripeConfigured = false;
+
+    const res = await startTutorOnboarding({}, new FormData());
+
+    expect(res.error).toBe("Payouts aren't available yet. Please check back soon.");
+    // Critically it never reached Stripe — the old behaviour let getStripe()
+    // throw and surfaced "Could not start onboarding", which sent us hunting
+    // for a payments bug when the answer was an unset env var.
+    expect(createExpressAccount).not.toHaveBeenCalled();
+  });
+
+  it("openStripeDashboard reports the real reason too", async () => {
+    stripeConfigured = false;
+
+    const res = await openStripeDashboard({}, new FormData());
+
+    expect(res.error).toBe("Payouts aren't available yet. Please check back soon.");
+    expect(createDashboardLink).not.toHaveBeenCalled();
+  });
+});
+
+describe("openStripeDashboard", () => {
+  it("redirects an onboarded tutor to their Express dashboard", async () => {
+    seed({ stripeAccountId: "acct_existing" });
+
+    const url = await captureRedirect(() => openStripeDashboard({}, new FormData()));
+
+    expect(createDashboardLink).toHaveBeenCalledWith("acct_existing");
+    expect(url).toBe("https://connect.stripe.test/express/acct_x");
+  });
+
+  it("refuses when the tutor has no connected account yet", async () => {
+    seed({ stripeAccountId: null });
+
+    const res = await openStripeDashboard({}, new FormData());
+
+    expect(res.error).toBe("Connect a payout account first");
+    expect(createDashboardLink).not.toHaveBeenCalled();
+  });
+
+  it("requires authentication", async () => {
+    seed({ user: null });
+
+    const res = await openStripeDashboard({}, new FormData());
+
+    expect(res.error).toBe("You must be signed in");
+    expect(createDashboardLink).not.toHaveBeenCalled();
+  });
+
+  it("uses the CALLER's own account id, never one supplied by the client", async () => {
+    // A hostile client posts someone else's account id; it must be ignored
+    // because the id is read from the caller's own tutor_profiles row.
+    seed({ stripeAccountId: "acct_mine" });
+    const fd = new FormData();
+    fd.set("accountId", "acct_someone_else");
+
+    await captureRedirect(() => openStripeDashboard({}, fd));
+
+    expect(createDashboardLink).toHaveBeenCalledWith("acct_mine");
+  });
+
+  it("does not leak Stripe's error text when the link cannot be created", async () => {
+    seed({ stripeAccountId: "acct_existing" });
+    createDashboardLink.mockRejectedValue(new Error("Stripe: account is not an Express account"));
+
+    const res = await openStripeDashboard({}, new FormData());
+
+    expect(res.error).toBe("Could not open your Stripe dashboard. Please try again.");
+    expect(res.error).not.toContain("Express account");
   });
 });

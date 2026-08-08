@@ -15,11 +15,33 @@ import Stripe from "stripe";
  */
 let stripeSingleton: Stripe | null = null;
 
+/**
+ * Whether Stripe credentials exist at all.
+ *
+ * Distinguishes "this deployment has no Stripe configured yet" from "Stripe
+ * rejected our request". Both used to surface as the same generic failure,
+ * which sent us hunting for a payments bug when the real answer was an
+ * unset env var. Callers should branch on this BEFORE calling getStripe()
+ * so the user and the logs get an accurate reason.
+ */
+export function isStripeConfigured(): boolean {
+  return Boolean(process.env.STRIPE_SECRET_KEY);
+}
+
+/** Thrown only when credentials are missing — never for a Stripe API error,
+ * so callers can tell configuration problems from payment problems. */
+export class StripeNotConfiguredError extends Error {
+  constructor() {
+    super("Stripe is not configured (STRIPE_SECRET_KEY is unset)");
+    this.name = "StripeNotConfiguredError";
+  }
+}
+
 export function getStripe(): Stripe {
   if (!stripeSingleton) {
     const secretKey = process.env.STRIPE_SECRET_KEY;
     if (!secretKey) {
-      throw new Error("STRIPE_SECRET_KEY is not configured");
+      throw new StripeNotConfiguredError();
     }
     stripeSingleton = new Stripe(secretKey, {
       apiVersion: "2026-06-24.dahlia",

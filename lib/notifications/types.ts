@@ -18,6 +18,8 @@ export type NotificationType =
   | "tutor_approved"
   | "tutor_rejected"
   | "payouts_enabled"
+  | "payouts_action_required"
+  | "payout_failed"
   | "review_received"
   | "review_replied"
   | "system_announcement";
@@ -39,6 +41,8 @@ export const NOTIFICATION_META: Record<NotificationType, NotificationMeta> = {
   tutor_approved: { category: "account", icon: "🎓" },
   tutor_rejected: { category: "account", icon: "📝" },
   payouts_enabled: { category: "account", icon: "💰" },
+  payouts_action_required: { category: "account", icon: "🛠️" },
+  payout_failed: { category: "payments", icon: "🏦" },
   review_received: { category: "reviews", icon: "⭐" },
   review_replied: { category: "reviews", icon: "💬" },
   system_announcement: { category: "system", icon: "📢" },

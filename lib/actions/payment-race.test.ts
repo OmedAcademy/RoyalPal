@@ -30,6 +30,9 @@ vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => fake.client })
 vi.mock("@/lib/notifications/service", () => ({
   NotificationService: { emit: vi.fn(), emitMany: vi.fn() },
 }));
+// Stripe credentials exist as far as this test is concerned — the race
+// under test is about webhook timing, not configuration.
+vi.mock("@/lib/stripe/client", () => ({ isStripeConfigured: () => true }));
 vi.mock("@/lib/stripe/checkout", () => ({
   createBookingCheckoutSession: (...a: unknown[]) => createCheckout(...a),
 }));

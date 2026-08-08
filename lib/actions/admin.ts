@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { NotificationService } from "@/lib/notifications/service";
 import { refundBookingPayment } from "@/lib/stripe/refunds";
+import { isStripeConfigured } from "@/lib/stripe/client";
 import { optionalText } from "@/lib/validations/shared";
 import { logger } from "@/lib/observability/logger";
 
@@ -163,6 +164,10 @@ export async function refundBooking(
 ): Promise<AdminActionState> {
   const auth = await authorizeAdmin();
   if (!auth.ok) return { error: auth.error };
+
+  if (!isStripeConfigured()) {
+    return { error: "Stripe is not configured on this deployment — refunds are unavailable." };
+  }
 
   const parsed = refundSchema.safeParse({
     bookingId: formData.get("bookingId"),

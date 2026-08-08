@@ -21,6 +21,13 @@ const refundBookingPayment = vi.fn();
 
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => fake.client }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => fake.client }));
+// Mocked rather than stubbing STRIPE_SECRET_KEY: no key-shaped placeholder
+// belongs in a committed file, and the behaviour under test is the action's
+// branching, not env parsing. Flip `stripeConfigured` to exercise the
+// unconfigured path.
+let stripeConfigured = true;
+vi.mock("@/lib/stripe/client", () => ({ isStripeConfigured: () => stripeConfigured }));
+
 vi.mock("@/lib/stripe/refunds", () => ({
   refundBookingPayment: (...a: unknown[]) => refundBookingPayment(...a),
 }));
@@ -60,6 +67,7 @@ function form(notes?: string): FormData {
 }
 
 beforeEach(() => {
+  stripeConfigured = true;
   seed();
   refundBookingPayment.mockReset();
   refundBookingPayment.mockResolvedValue({ id: "re_1" });
@@ -140,6 +148,20 @@ describe("refundBooking — failure isolation", () => {
     const res = await refundBooking({}, form());
 
     expect(res.error).toBe("Stripe refund failed: No such payment_intent");
+    expect(fake.db.admin_actions).toHaveLength(0);
+  });
+});
+
+describe("refundBooking — graceful degradation", () => {
+  it("names the real problem rather than reporting a Stripe failure", async () => {
+    stripeConfigured = false;
+
+    const res = await refundBooking({}, form());
+
+    expect(res.error).toBe(
+      "Stripe is not configured on this deployment — refunds are unavailable.",
+    );
+    expect(refundBookingPayment).not.toHaveBeenCalled();
     expect(fake.db.admin_actions).toHaveLength(0);
   });
 });

@@ -98,6 +98,14 @@ export interface Database {
           total_reviews: number;
           stripe_account_id: string | null;
           stripe_charges_enabled: boolean;
+          /** Fuller Connect state (migration 0026). Mirrors of Stripe's own
+           * account object, written only by the account.updated webhook.
+           * charges_enabled and payouts_enabled are deliberately separate:
+           * an account can take charges while its bank payouts are paused. */
+          stripe_payouts_enabled: boolean;
+          stripe_details_submitted: boolean;
+          stripe_requirements_due: string[];
+          stripe_disabled_reason: string | null;
           /** Per-tutor commission override in basis points (migration 0025).
            * Null = use the platform rate. See lib/pricing/commission.ts. */
           platform_fee_bps: number | null;
@@ -124,6 +132,10 @@ export interface Database {
           total_reviews?: number;
           stripe_account_id?: string | null;
           stripe_charges_enabled?: boolean;
+          stripe_payouts_enabled?: boolean;
+          stripe_details_submitted?: boolean;
+          stripe_requirements_due?: string[];
+          stripe_disabled_reason?: string | null;
           platform_fee_bps?: number | null;
           created_at?: string;
           updated_at?: string;

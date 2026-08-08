@@ -368,7 +368,9 @@ export async function handleAccountUpdated(account: Stripe.Account): Promise<voi
   const admin = createAdminClient();
   const { data: tutorProfile, error: lookupError } = await admin
     .from("tutor_profiles")
-    .select("id, stripe_charges_enabled")
+    .select(
+      "id, stripe_charges_enabled, stripe_payouts_enabled, stripe_details_submitted, stripe_disabled_reason",
+    )
     .eq("stripe_account_id", account.id)
     .maybeSingle();
 
@@ -386,16 +388,43 @@ export async function handleAccountUpdated(account: Stripe.Account): Promise<voi
   }
 
   const chargesEnabled = account.charges_enabled ?? false;
-  if (chargesEnabled === tutorProfile.stripe_charges_enabled) {
-    // No-op: account.updated fires repeatedly as onboarding progresses
-    // (e.g. individual fields being verified) well before charges_enabled
-    // itself changes value.
+  const payoutsEnabled = account.payouts_enabled ?? false;
+  const detailsSubmitted = account.details_submitted ?? false;
+  const disabledReason = account.requirements?.disabled_reason ?? null;
+  // `currently_due` is what Stripe wants NOW; `past_due` is already overdue.
+  // Both are surfaced together because the tutor has to supply either, and
+  // the distinction only matters for how loudly we ask.
+  const requirementsDue = [
+    ...(account.requirements?.currently_due ?? []),
+    ...(account.requirements?.past_due ?? []),
+  ];
+
+  const unchanged =
+    chargesEnabled === tutorProfile.stripe_charges_enabled &&
+    payoutsEnabled === tutorProfile.stripe_payouts_enabled &&
+    detailsSubmitted === tutorProfile.stripe_details_submitted &&
+    disabledReason === tutorProfile.stripe_disabled_reason;
+
+  if (unchanged) {
+    // account.updated fires repeatedly as onboarding progresses — often for
+    // fields we don't mirror. Skipping here keeps the notification below
+    // tied to a real state change rather than to Stripe's chattiness.
     return;
   }
 
+  // Whether the tutor is newly able to earn, used for the notification
+  // below. Captured before the write so it reflects an actual transition.
+  const becameActive = chargesEnabled && !tutorProfile.stripe_charges_enabled;
+
   const { error: updateError } = await admin
     .from("tutor_profiles")
-    .update({ stripe_charges_enabled: chargesEnabled })
+    .update({
+      stripe_charges_enabled: chargesEnabled,
+      stripe_payouts_enabled: payoutsEnabled,
+      stripe_details_submitted: detailsSubmitted,
+      stripe_requirements_due: Array.from(new Set(requirementsDue)),
+      stripe_disabled_reason: disabledReason,
+    })
     .eq("id", tutorProfile.id);
 
   if (updateError) {
@@ -406,12 +435,32 @@ export async function handleAccountUpdated(account: Stripe.Account): Promise<voi
     return;
   }
 
-  if (chargesEnabled) {
+  if (becameActive) {
     await NotificationService.emit({
       userId: tutorProfile.id,
       type: "payouts_enabled",
       title: "Payouts are active",
       body: "Your Stripe account is verified. You'll now receive payouts automatically after each paid lesson.",
+      data: { href: "/tutor/payouts" },
+    });
+    return;
+  }
+
+  // Stripe restricted an account that was previously fine — the tutor
+  // cannot earn until they resolve it, and they will not find out unless
+  // told. A newly-restricted account is the one account.updated transition
+  // that genuinely needs to interrupt someone.
+  if (disabledReason && !tutorProfile.stripe_disabled_reason) {
+    log.error("connect account restricted", undefined, {
+      tutorId: tutorProfile.id,
+      accountId: account.id,
+      disabledReason,
+    });
+    await NotificationService.emit({
+      userId: tutorProfile.id,
+      type: "payouts_action_required",
+      title: "Action needed on your payout account",
+      body: "Stripe needs more information before you can be paid. Open your payouts page to resolve it.",
       data: { href: "/tutor/payouts" },
     });
   }
@@ -519,7 +568,7 @@ export async function handleChargeRefunded(charge: Stripe.Charge): Promise<void>
 async function notifyAdmins(
   admin: AdminClient,
   input: {
-    type: "transfer_reversed" | "dispute_created" | "dispute_resolved";
+    type: "transfer_reversed" | "dispute_created" | "dispute_resolved" | "payout_failed";
     title: string;
     body: string;
     href: string;
@@ -931,5 +980,88 @@ export async function handleChargeDisputeUpdated(dispute: Stripe.Dispute): Promi
       ? "A disputed lesson payment was resolved in RoyalPal's favour. Stripe has returned the amount to the platform balance."
       : "A disputed lesson payment was lost. The amount and the dispute fee stay withdrawn from the platform balance — the tutor's payout was not clawed back.",
     href: "/admin/payments",
+  });
+}
+
+/**
+ * The SECOND leg of getting a tutor paid: money moving from their Stripe
+ * balance to their bank account.
+ *
+ * Distinct from transfers, which are the FIRST leg (platform balance ->
+ * tutor's Stripe balance). A tutor can be `transfer_status='paid'` on
+ * every lesson and still have received no actual cash, because payouts to
+ * their bank are a separate schedule that can fail on its own — a closed
+ * account, a wrong IBAN, a bank rejection.
+ *
+ * OWNERSHIP DIFFERS FROM EVERY OTHER HANDLER HERE. payout.* are Connect
+ * events: the connected account is on the EVENT (`event.account`), not on
+ * the Payout object, which has no field naming whose payout it is. The
+ * caller must pass it through — hence the extra parameter rather than the
+ * usual single-object signature.
+ *
+ * Payouts are deliberately NOT recorded per-booking. One payout batches
+ * many transfers across many lessons, so there is no booking to attach it
+ * to; modelling it properly needs its own table, which is out of scope
+ * until there is a tutor-facing payout history to render. The full event
+ * payload is already persisted in stripe_events regardless, so nothing is
+ * lost in the meantime.
+ */
+export async function handlePayoutFailed(
+  payout: Stripe.Payout,
+  connectedAccountId: string | undefined,
+): Promise<void> {
+  if (!connectedAccountId) return; // A platform payout, not a tutor's.
+
+  const admin = createAdminClient();
+  const { data: tutorProfile } = await admin
+    .from("tutor_profiles")
+    .select("id")
+    .eq("stripe_account_id", connectedAccountId)
+    .maybeSingle();
+
+  if (!tutorProfile) return; // Not one of our tutors — fails closed.
+
+  const reason = payout.failure_message ?? payout.failure_code ?? "unknown";
+
+  log.error("tutor bank payout failed", undefined, {
+    payoutId: payout.id,
+    tutorId: tutorProfile.id,
+    accountId: connectedAccountId,
+    amountCents: payout.amount,
+    reason,
+  });
+
+  // The tutor is the one who can actually fix this — it is their bank
+  // details Stripe could not pay into. Admins are told too because a
+  // failing payout usually means an unhappy tutor is about to ask.
+  await NotificationService.emit({
+    userId: tutorProfile.id,
+    type: "payout_failed",
+    title: "Your payout didn't reach your bank",
+    body: "Stripe couldn't pay your earnings into your bank account. Check your payout details — the money is safe in your Stripe balance.",
+    data: { href: "/tutor/payouts" },
+  });
+
+  await notifyAdmins(admin, {
+    type: "payout_failed",
+    title: "A tutor's bank payout failed",
+    body: `Stripe could not pay a tutor's balance into their bank (${reason}). Their earnings are still in their Stripe balance.`,
+    href: "/admin/payments",
+  });
+}
+
+/** A payout reached the tutor's bank. Logged for traceability only — a
+ * payout working is not news, exactly like transfer.created. */
+export async function handlePayoutPaid(
+  payout: Stripe.Payout,
+  connectedAccountId: string | undefined,
+): Promise<void> {
+  if (!connectedAccountId) return;
+
+  log.info("tutor bank payout paid", {
+    payoutId: payout.id,
+    accountId: connectedAccountId,
+    amountCents: payout.amount,
+    currency: payout.currency,
   });
 }

@@ -62,3 +62,22 @@ export async function createOnboardingLink(params: {
 
   return link.url;
 }
+
+/**
+ * A single-use link into the tutor's Stripe Express dashboard, where they
+ * can see their balance, payout schedule, and any outstanding
+ * requirements.
+ *
+ * This is the correct destination for an ALREADY-ONBOARDED account.
+ * Sending them back through `account_onboarding` instead would restart a
+ * flow they have finished, and Stripe rejects that for a completed
+ * account anyway.
+ *
+ * The URL expires quickly and is tied to one session, so it must never be
+ * cached, stored, or emailed — always generate it on demand behind an
+ * authenticated action.
+ */
+export async function createDashboardLink(accountId: string): Promise<string> {
+  const link = await getStripe().accounts.createLoginLink(accountId);
+  return link.url;
+}

@@ -3,7 +3,12 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { activeUserOrError } from "@/lib/supabase/queries";
-import { createExpressAccount, createOnboardingLink } from "@/lib/stripe/connect";
+import {
+  createDashboardLink,
+  createExpressAccount,
+  createOnboardingLink,
+} from "@/lib/stripe/connect";
+import { isStripeConfigured } from "@/lib/stripe/client";
 import { logger } from "@/lib/observability/logger";
 
 export type ConnectActionState = { error?: string };
@@ -27,6 +32,13 @@ export async function startTutorOnboarding(
   _prevState: ConnectActionState,
   _formData: FormData,
 ): Promise<ConnectActionState> {
+  // Checked before any DB work: without credentials there is nothing to
+  // onboard TO, and reporting that plainly beats a generic failure that
+  // looks like a Stripe outage.
+  if (!isStripeConfigured()) {
+    return { error: "Payouts aren't available yet. Please check back soon." };
+  }
+
   const supabase = await createClient();
   const auth = await activeUserOrError(supabase);
   if ("error" in auth) {
@@ -102,4 +114,53 @@ export async function startTutorOnboarding(
   }
 
   redirect(onboardingUrl);
+}
+
+/**
+ * Sends an onboarded tutor into their Stripe Express dashboard.
+ *
+ * Separate from startTutorOnboarding because the two are not
+ * interchangeable: onboarding links are for accounts that still need to
+ * submit details, login links are for accounts that already have. Using
+ * the wrong one either restarts a finished flow or is rejected by Stripe
+ * outright.
+ *
+ * The account id is read from the caller's OWN tutor_profiles row — never
+ * accepted as a parameter — so this cannot be used to mint a dashboard
+ * link into somebody else's Stripe account.
+ */
+export async function openStripeDashboard(
+  _prevState: ConnectActionState,
+  _formData: FormData,
+): Promise<ConnectActionState> {
+  if (!isStripeConfigured()) {
+    return { error: "Payouts aren't available yet. Please check back soon." };
+  }
+
+  const supabase = await createClient();
+  const auth = await activeUserOrError(supabase);
+  if ("error" in auth) {
+    return { error: auth.error };
+  }
+  const userId = auth.user.id;
+
+  const { data: tutorProfile } = await supabase
+    .from("tutor_profiles")
+    .select("stripe_account_id")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (!tutorProfile?.stripe_account_id) {
+    return { error: "Connect a payout account first" };
+  }
+
+  let url: string;
+  try {
+    url = await createDashboardLink(tutorProfile.stripe_account_id);
+  } catch (err) {
+    log.error("failed to create dashboard link", err, { tutorId: userId });
+    return { error: "Could not open your Stripe dashboard. Please try again." };
+  }
+
+  redirect(url);
 }

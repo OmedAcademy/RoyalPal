@@ -8,6 +8,8 @@ import {
   handleChargeDisputeCreated,
   handleChargeDisputeUpdated,
   handleChargeRefunded,
+  handlePayoutFailed,
+  handlePayoutPaid,
   handleTransferCreated,
   handleTransferReversed,
   handleCheckoutSessionCompleted,
@@ -115,6 +117,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // the tutor after a paid lesson" gap.
       case "transfer.reversed":
         await handleTransferReversed(event.data.object);
+        break;
+      // payout.* are CONNECT events: the connected account is on the event
+      // itself, not on the Payout object, so it has to be passed through.
+      case "payout.failed":
+        await handlePayoutFailed(event.data.object, event.account);
+        break;
+      case "payout.paid":
+        await handlePayoutPaid(event.data.object, event.account);
         break;
       default:
         // Unhandled event types are expected — Stripe sends far more event

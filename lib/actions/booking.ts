@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { activeUserOrError } from "@/lib/supabase/queries";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createBookingCheckoutSession } from "@/lib/stripe/checkout";
+import { isStripeConfigured } from "@/lib/stripe/client";
 import {
   createBookingSchema,
   retryBookingPaymentSchema,
@@ -170,6 +171,13 @@ export async function createBooking(
   }
   const user = auth.user;
 
+  // Every lesson is paid, so an unconfigured Stripe makes booking
+  // impossible. Refuse up front rather than creating a booking row and
+  // immediately cancelling it when checkout fails.
+  if (!isStripeConfigured()) {
+    return { error: "Booking is temporarily unavailable. Please try again later." };
+  }
+
   const { data: tutorProfile } = await supabase
     .from("tutor_profiles")
     .select(
@@ -304,6 +312,10 @@ export async function retryBookingPayment(
     return { error: parsed.error.issues[0]?.message ?? "Invalid booking" };
   }
   const { bookingId } = parsed.data;
+
+  if (!isStripeConfigured()) {
+    return { error: "Payment is temporarily unavailable. Please try again later." };
+  }
 
   const supabase = await createClient();
   const auth = await activeUserOrError(supabase);
