@@ -9,6 +9,7 @@ import {
   createOnboardingLink,
 } from "@/lib/stripe/connect";
 import { isStripeConfigured } from "@/lib/stripe/client";
+import { stripeCountryFor } from "@/lib/stripe/connect-country";
 import { logger } from "@/lib/observability/logger";
 
 export type ConnectActionState = { error?: string };
@@ -59,6 +60,21 @@ export async function startTutorOnboarding(
     return { error: "Add your country in your profile before connecting payouts" };
   }
 
+  // profiles.country holds a display name; Stripe needs ISO alpha-2. Resolved
+  // here rather than inside createExpressAccount so an unmappable country
+  // fails with a message the tutor can act on, instead of becoming a generic
+  // Stripe rejection.
+  const country = stripeCountryFor(profile.country);
+  if (!country.ok) {
+    log.error("could not resolve a Stripe country", undefined, {
+      tutorId: userId,
+      reason: country.reason,
+    });
+    return {
+      error: "We couldn't match your country to a payout region. Please contact support.",
+    };
+  }
+
   const { data: tutorProfile } = await supabase
     .from("tutor_profiles")
     .select("stripe_account_id")
@@ -80,7 +96,7 @@ export async function startTutorOnboarding(
       accountId = await createExpressAccount({
         tutorId: userId,
         email: user?.email ?? null,
-        country: profile.country,
+        country: country.code,
       });
     } catch (err) {
       log.error("failed to create Connect account", err, { tutorId: userId });
