@@ -13,14 +13,10 @@ objects are isolated by the `app=royalpal` metadata tag, not by account.
 
 ---
 
-## Phase 0 — Apply the outstanding migrations FIRST
+## Phase 0 — Migrations ✅ DONE
 
-Both `0024` and `0025` are written but **not applied**. The webhook
-handlers write columns that do not exist yet, so every payout/dispute
-event would fail until this is done. See `docs/PENDING_MIGRATIONS.sql`.
-
-`DONE` when: `select transfer_status, platform_fee_bps from ...` runs
-without error.
+`0024`, `0025` and `0026` are all applied to the remote database and
+verified by querying the columns directly. Nothing to do here.
 
 ---
 
@@ -42,9 +38,16 @@ with the **"Test mode" toggle ON**.
 "Get started" prompt, Connect has never been activated. Activate it and
 choose **Express**. Nothing below works until Connect is on.
 
-`BLOCKED` until: the three Stripe keys are non-empty.
-**I cannot do this step — do not paste keys into chat; put them in
-`.env.local` directly.**
+**✅ DONE.** All three keys are present, correctly prefixed, and free of
+whitespace. Connect is enabled (verified: `stripe accounts list` returns a
+valid list rather than an error).
+
+Two whitespace bugs were found and fixed here the hard way — a leading
+space on the publishable key and a trailing space + CR on
+`SUPABASE_SERVICE_ROLE_KEY`. The latter silently broke EVERY service-role
+write while the webhook still returned `200`, because the idempotency
+ledger fails open by design. If anything writes nothing while logging
+success, check for whitespace in `.env.local` first.
 
 ---
 
@@ -80,7 +83,11 @@ Confirm `metadata.app == "royalpal"` and `metadata.tutor_id` matches.
 
 ---
 
-## Phase 3 — Webhook endpoint
+## Phase 3 — Webhook endpoint ✅ PROVEN
+
+Signature verification, dispatch, the idempotency ledger row with
+`processed_at`, and duplicate-delivery rejection have all been observed
+against real Stripe. Kept here as the reproduction recipe.
 
 **Local (fastest — no deployment needed):**
 
@@ -89,16 +96,21 @@ stripe login
 ```
 
 ```bash
-stripe listen --forward-to localhost:3000/api/webhooks/stripe --events checkout.session.completed,checkout.session.expired,payment_intent.succeeded,payment_intent.payment_failed,account.updated,charge.refunded,charge.dispute.created,charge.dispute.updated,charge.dispute.closed,transfer.created,transfer.reversed
+stripe listen --forward-to localhost:3000/api/webhooks/stripe --events checkout.session.completed,checkout.session.expired,payment_intent.succeeded,payment_intent.payment_failed,account.updated,charge.refunded,charge.dispute.created,charge.dispute.updated,charge.dispute.closed,transfer.created,transfer.reversed,payout.paid,payout.failed
 ```
 
 Copy the `whsec_…` it prints into `STRIPE_WEBHOOK_SECRET`, then **restart
 `npm run dev`** (env is read at boot).
 
-> The `--events` list is exactly the eleven the route handles. Every one
-> exists in the pinned SDK — verified against `Events.d.ts`.
+> The `--events` list is exactly the **thirteen** the route handles. Every
+> one exists in the pinned SDK — verified against `Events.d.ts`.
 > `transfer.failed` is deliberately absent: **it does not exist** in this
 > API version.
+>
+> **The forward path is `/api/webhooks/stripe`** — not `/api/stripe/webhook`.
+> Getting those two segments the wrong way round produces silent 404s that
+> look exactly like "events just aren't arriving". It has already cost one
+> debugging session.
 
 Now re-trigger the account sync so the tutor goes active:
 
