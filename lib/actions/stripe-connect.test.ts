@@ -22,6 +22,13 @@ const createOnboardingLink = vi.fn();
 const createDashboardLink = vi.fn();
 
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => fake.client }));
+// The account-id write goes through the service-role client (migration 0028
+// locks stripe_account_id against every user session). By default it shares
+// the session fake's rows so assertions on fake.db see the write; a test that
+// must prove WHICH client wrote sets `adminFake` to a separate store.
+let adminFake: ReturnType<typeof createFakeSupabase> | null = null;
+const createAdminClient = vi.fn(() => (adminFake ?? fake).client);
+vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => createAdminClient() }));
 // Mocked rather than stubbing STRIPE_SECRET_KEY: no key-shaped placeholder
 // belongs in a committed file, and the behaviour under test is the action's
 // branching, not env parsing. Flip `stripeConfigured` to exercise the
@@ -89,6 +96,8 @@ function seed(
 
 beforeEach(() => {
   stripeConfigured = true;
+  adminFake = null;
+  createAdminClient.mockClear();
   seed();
   createExpressAccount.mockReset();
   createOnboardingLink.mockReset();
@@ -143,6 +152,21 @@ describe("startTutorOnboarding — account creation", () => {
     });
     expect(fake.db.tutor_profiles[0].stripe_account_id).toBe("acct_new");
     expect(url).toBe("https://connect.stripe.test/setup/acct_new");
+  });
+
+  it("persists the account id through the service-role client, never the tutor's own session", async () => {
+    // Migration 0028 refuses stripe_account_id from every user session, so a
+    // write through the RLS client would fail in production. A separate store
+    // proves which client actually wrote.
+    adminFake = createFakeSupabase({
+      tutor_profiles: [{ id: TUTOR, stripe_account_id: null }],
+    });
+
+    await captureRedirect(() => startTutorOnboarding({}, new FormData()));
+
+    expect(createAdminClient).toHaveBeenCalledTimes(1);
+    expect(adminFake.db.tutor_profiles[0].stripe_account_id).toBe("acct_new");
+    expect(fake.db.tutor_profiles[0].stripe_account_id).toBeNull();
   });
 
   it("passes both return_url and refresh_url to the onboarding link", async () => {

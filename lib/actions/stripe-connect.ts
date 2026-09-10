@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { activeUserOrError } from "@/lib/supabase/queries";
 import {
   createDashboardLink,
@@ -24,10 +25,9 @@ const log = logger.child({ component: "stripe-connect-action" });
  * and comes back gets a fresh link for the *same* account rather than a
  * second one.
  *
- * The account-id write uses the request-scoped RLS client, not the
- * service-role client: this is the tutor updating their own row, which
- * tutor_profiles_update_own_or_admin already permits, and it's account
- * linkage rather than a financial ledger write.
+ * The account-id write uses the service-role client. stripe_account_id is
+ * the payout destination for every destination charge, so migration 0028
+ * refuses it from any user session — see the comment at the write below.
  */
 export async function startTutorOnboarding(
   _prevState: ConnectActionState,
@@ -103,7 +103,14 @@ export async function startTutorOnboarding(
       return { error: "Could not start onboarding. Please try again." };
     }
 
-    const { error: updateError } = await supabase
+    // Service role, deliberately: migration 0028 makes stripe_account_id
+    // system-only, because it is where Stripe sends this tutor's share of
+    // every charge — no user session may set it, or a tutor could point it at
+    // any account. Elevated rights are safe here because neither input comes
+    // from the request: accountId is Stripe's own accounts.create response,
+    // and userId is the caller's authenticated session, already checked above
+    // to be an active tutor with a profile.
+    const { error: updateError } = await createAdminClient()
       .from("tutor_profiles")
       .update({ stripe_account_id: accountId })
       .eq("id", userId);
