@@ -13,6 +13,7 @@
  *   from(t).select(cols).eq(c,v)...maybeSingle()
  *   from(t).update(patch).eq(c,v)...
  *   from(t).upsert(payload, { onConflict })
+ *   from(t).delete().eq(c,v)...
  */
 
 export type Row = Record<string, unknown>;
@@ -38,7 +39,7 @@ class Query implements PromiseLike<Result<Row[]>> {
 
   constructor(
     private rows: Row[],
-    private op: "select" | "update" | "upsert" | "insert",
+    private op: "select" | "update" | "upsert" | "insert" | "delete",
     private payload?: Row,
     private onConflict?: string,
     private control?: Control,
@@ -139,6 +140,13 @@ class Query implements PromiseLike<Result<Row[]>> {
         : { data: target, error: null };
     }
 
+    if (this.op === "delete") {
+      for (let i = this.rows.length - 1; i >= 0; i--) {
+        if (this.matches(this.rows[i])) this.rows.splice(i, 1);
+      }
+      return { data: null, error: null };
+    }
+
     // upsert
     const key = this.onConflict ?? "id";
     const existing = this.rows.find((r) => r[key] === this.payload?.[key]);
@@ -187,6 +195,7 @@ export function createFakeSupabase(tables: Tables, user: { id: string } | null =
           update: (patch: Row) => withSingle(new Query(rows, "update", patch)),
           upsert: (payload: Row, opts?: { onConflict?: string }) =>
             withSingle(new Query(rows, "upsert", payload, opts?.onConflict)),
+          delete: () => withSingle(new Query(rows, "delete")),
         };
       },
     },
