@@ -4,8 +4,12 @@ import { createFakeSupabase } from "@/tests/helpers/fake-supabase";
 /**
  * Profile Server Actions — the application half of migrations 0027/0028.
  *
- * The database now refuses platform-controlled columns from any user
- * session. These tests pin the defence-in-depth half: both actions build
+ * Those migrations make the database refuse platform-controlled columns from
+ * any user session. On production, as of 10 September 2026, only 0027
+ * (profiles.role and profiles.status) is applied and verified; 0028
+ * (tutor_profiles commission, Stripe and rating columns) is locally proven
+ * but NOT applied, so the database does not yet protect those columns there.
+ * These tests pin the defence-in-depth half: both actions build
  * their write payloads from an explicit allowlist of parsed form fields, so
  * a hostile form carrying role/status/commission/Stripe fields never reaches
  * the query at all. If a future refactor spreads form data or an existing

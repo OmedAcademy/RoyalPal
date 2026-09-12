@@ -13,10 +13,24 @@ objects are isolated by the `app=royalpal` metadata tag, not by account.
 
 ---
 
-## Phase 0 — Migrations ✅ DONE
+## Phase 0 — Migrations: NOT all applied (0028 is pending on production)
 
-`0024`, `0025` and `0026` are all applied to the remote database and
-verified by querying the columns directly. Nothing to do here.
+Production database, as of 10 September 2026:
+
+| Migration     | What it does                                                 | On production        | Evidence                                                                    |
+| ------------- | ------------------------------------------------------------ | -------------------- | --------------------------------------------------------------------------- |
+| `0001`–`0023` | Schema, RLS, Stripe payments, webhook ledger                 | ✅ applied           | the app and the webhook ledger run against them; not re-verified one by one |
+| `0024`–`0026` | Transfer/dispute state, commission override, Connect state   | ✅ applied           | columns queried directly                                                    |
+| `0027`        | Locks `profiles.role` and `profiles.status`                  | ✅ applied, verified | trigger query: enabled, `SECURITY INVOKER`                                  |
+| `0028`        | Locks `tutor_profiles` commission, Stripe and rating columns | ❌ **NOT applied**   | written and proven against a local database only                            |
+
+The Stripe prerequisites for this runbook (`0024`–`0026`) are in place. Until
+`0028` is applied, a tutor can write their own `stripe_account_id`,
+`stripe_charges_enabled`, `platform_fee_bps`, `avg_rating` and
+`total_reviews` on production — nothing in this runbook makes those columns
+trustworthy there. Apply `0028` only once the service-role onboarding write
+in `lib/actions/stripe-connect.ts` is the code actually deployed, or tutor
+onboarding breaks.
 
 ---
 
@@ -70,8 +84,10 @@ npm run dev
 4. You land back on `/tutor/payouts?connect=return`.
 
 **Expected:** status shows **"pending"**, not "active". That is correct —
-`stripe_charges_enabled` is flipped only by the `account.updated` webhook,
-which is not listening yet. It goes active in Phase 3.
+in the app, `stripe_charges_enabled` is flipped only by the `account.updated`
+webhook, which is not listening yet. It goes active in Phase 3. On production
+the database does not enforce this until `0028` is applied (see Phase 0): a
+tutor can still set the column directly.
 
 Verify the account exists and is ours:
 

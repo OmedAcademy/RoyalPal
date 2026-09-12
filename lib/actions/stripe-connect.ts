@@ -26,8 +26,10 @@ const log = logger.child({ component: "stripe-connect-action" });
  * second one.
  *
  * The account-id write uses the service-role client. stripe_account_id is
- * the payout destination for every destination charge, so migration 0028
- * refuses it from any user session — see the comment at the write below.
+ * the payout destination for every destination charge, so no user session
+ * may set it. Migration 0028 enforces that in the database, but it is NOT
+ * applied to production (as of 10 September 2026 only 0027 is): there the
+ * column is still tutor-writable. See the comment at the write below.
  */
 export async function startTutorOnboarding(
   _prevState: ConnectActionState,
@@ -103,13 +105,16 @@ export async function startTutorOnboarding(
       return { error: "Could not start onboarding. Please try again." };
     }
 
-    // Service role, deliberately: migration 0028 makes stripe_account_id
-    // system-only, because it is where Stripe sends this tutor's share of
-    // every charge — no user session may set it, or a tutor could point it at
-    // any account. Elevated rights are safe here because neither input comes
-    // from the request: accountId is Stripe's own accounts.create response,
-    // and userId is the caller's authenticated session, already checked above
-    // to be an active tutor with a profile.
+    // Service role, deliberately. stripe_account_id is where Stripe sends this
+    // tutor's share of every charge, so it must be system-only — otherwise a
+    // tutor could point it at any account. Migration 0028 enforces that, but
+    // as of 10 September 2026 it is written and locally proven, NOT applied to
+    // production: there tutor_profiles is still unprotected, and this write
+    // must already be the deployed code before 0028 is applied, or onboarding
+    // breaks. Elevated rights are safe here because neither input comes from
+    // the request: accountId is Stripe's own accounts.create response, and
+    // userId is the caller's authenticated session, already checked above to
+    // be an active tutor with a profile.
     const { error: updateError } = await createAdminClient()
       .from("tutor_profiles")
       .update({ stripe_account_id: accountId })

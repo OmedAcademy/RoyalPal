@@ -22,10 +22,12 @@ const createOnboardingLink = vi.fn();
 const createDashboardLink = vi.fn();
 
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => fake.client }));
-// The account-id write goes through the service-role client (migration 0028
-// locks stripe_account_id against every user session). By default it shares
-// the session fake's rows so assertions on fake.db see the write; a test that
-// must prove WHICH client wrote sets `adminFake` to a separate store.
+// The account-id write goes through the service-role client because migration
+// 0028 locks stripe_account_id against every user session. 0028 is locally
+// proven but NOT applied to production (as of 10 September 2026 only 0027 is).
+// By default the admin mock shares the session fake's rows so assertions on
+// fake.db see the write; a test that must prove WHICH client wrote sets
+// `adminFake` to a separate store.
 let adminFake: ReturnType<typeof createFakeSupabase> | null = null;
 const createAdminClient = vi.fn(() => (adminFake ?? fake).client);
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => createAdminClient() }));
@@ -155,9 +157,11 @@ describe("startTutorOnboarding — account creation", () => {
   });
 
   it("persists the account id through the service-role client, never the tutor's own session", async () => {
-    // Migration 0028 refuses stripe_account_id from every user session, so a
-    // write through the RLS client would fail in production. A separate store
-    // proves which client actually wrote.
+    // Migration 0028 refuses stripe_account_id from every user session, so
+    // once it is applied a write through the RLS client would fail. As of
+    // 10 September 2026 it is NOT applied to production, which is why this
+    // must already hold before it is. A separate store proves which client
+    // actually wrote.
     adminFake = createFakeSupabase({
       tutor_profiles: [{ id: TUTOR, stripe_account_id: null }],
     });

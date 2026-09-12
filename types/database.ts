@@ -99,7 +99,10 @@ export interface Database {
           stripe_account_id: string | null;
           stripe_charges_enabled: boolean;
           /** Fuller Connect state (migration 0026). Mirrors of Stripe's own
-           * account object, written only by the account.updated webhook.
+           * account object, meant to be written only by the account.updated
+           * webhook. Migration 0028 enforces that in the database, but it is
+           * NOT applied to production (as of 10 September 2026): there a
+           * tutor can still write these columns directly.
            * charges_enabled and payouts_enabled are deliberately separate:
            * an account can take charges while its bank payouts are paused. */
           stripe_payouts_enabled: boolean;
