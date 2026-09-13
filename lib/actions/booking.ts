@@ -6,6 +6,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { activeUserOrError } from "@/lib/supabase/queries";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getTutorAvailableSlots } from "@/lib/supabase/availability";
 import { createBookingCheckoutSession } from "@/lib/stripe/checkout";
 import { isStripeConfigured } from "@/lib/stripe/client";
 import {
@@ -220,11 +221,40 @@ export async function createBooking(
     return { error: "This tutor does not teach that subject" };
   }
 
+  // The insert below runs through the service role (migration 0029 removed the
+  // client INSERT path), so what a database policy used to take on trust is
+  // checked here: the caller must be a student, and startAt — a hidden form
+  // field, so client input like any other — must be one of the tutor's open
+  // slots.
+  const { data: caller } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .maybeSingle();
+  if (caller?.role !== "student") {
+    return { error: "Only students can book lessons" };
+  }
+
   const startDate = new Date(startAt);
   if (startDate.getTime() <= Date.now()) {
     return { error: "Pick a time in the future" };
   }
   const endDate = new Date(startDate.getTime() + durationMinutes * 60_000);
+
+  // Same timezone fallback as the booking page, so both see the same slots.
+  const { data: tutorAccount } = await supabase
+    .from("profiles")
+    .select("timezone")
+    .eq("id", tutorId)
+    .maybeSingle();
+  const slots = await getTutorAvailableSlots({
+    tutorId,
+    timeZone: tutorAccount?.timezone ?? "UTC",
+    durationMinutes,
+  });
+  if (!slots.some((slot) => slot.startAt.getTime() === startDate.getTime())) {
+    return { error: "That time isn't one of this tutor's open slots. Please pick another." };
+  }
 
   // Price is always derived server-side from the tutor's stored rate, never
   // from client input — the form only ever sends tutorId/subjectId/time.
@@ -239,7 +269,7 @@ export async function createBooking(
     resolvePlatformFeeBps(tutorProfile.platform_fee_bps),
   );
 
-  const { data: booking, error: insertError } = await supabase
+  const { data: booking, error: insertError } = await createAdminClient()
     .from("bookings")
     .insert({
       student_id: user.id,
@@ -261,7 +291,16 @@ export async function createBooking(
     if (insertError.code === EXCLUSION_VIOLATION) {
       return { error: "That time was just booked by someone else — pick another slot." };
     }
-    return { error: insertError.message };
+    // Anything else is logged, never shown raw. The refusal a real user can hit
+    // is migration 0029's insert invariant (42501): the tutor changed their
+    // rate between the read above and this insert.
+    log.error("failed to insert booking", insertError, { tutorId, studentId: user.id });
+    if (insertError.code === "42501") {
+      return {
+        error: "This tutor's price changed while you were booking. Please refresh and try again.",
+      };
+    }
+    return { error: "We couldn't create your booking. Please try again." };
   }
 
   // Booking stays 'pending_payment' (the column default) until the Stripe
