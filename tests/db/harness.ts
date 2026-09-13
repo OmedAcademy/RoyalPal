@@ -37,8 +37,11 @@ export async function createTestDb(): Promise<Db> {
   const db = new PGlite({ extensions: { pgcrypto, btree_gist } });
   await db.exec(readFileSync(SHIM, "utf8"));
 
+  // DB_TEST_MAX_MIGRATION=28 builds the schema as it stood before 0029, so an
+  // attack can be shown to succeed before its fix lands. Unset = every file.
+  const maxMigration = Number(process.env.DB_TEST_MAX_MIGRATION ?? Number.POSITIVE_INFINITY);
   const migrations = readdirSync(MIGRATIONS_DIR)
-    .filter((file) => /^\d{4}_.+\.sql$/.test(file))
+    .filter((file) => /^\d{4}_.+\.sql$/.test(file) && Number(file.slice(0, 4)) <= maxMigration)
     .sort();
   for (const file of migrations) {
     try {
