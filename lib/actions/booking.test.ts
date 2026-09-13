@@ -31,7 +31,18 @@ const emit = vi.fn();
 const createCheckout = vi.fn();
 
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => fake.client }));
-vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => fake.client }));
+// The booking insert runs through the service-role client. By default it
+// shares the session fake's rows so assertions on fake.db see the write; a
+// test that must prove WHICH client inserted sets `adminFake` to its own store.
+let adminFake: ReturnType<typeof createFakeSupabase> | null = null;
+const createAdminClient = vi.fn(() => (adminFake ?? fake).client);
+vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => createAdminClient() }));
+// Slot computation has its own tests (lib/utils/availability-slots.test.ts);
+// here it is stubbed so each test decides which start times are open.
+const getSlots = vi.fn();
+vi.mock("@/lib/supabase/availability", () => ({
+  getTutorAvailableSlots: (...a: unknown[]) => getSlots(...a),
+}));
 vi.mock("@/lib/notifications/service", () => ({
   NotificationService: { emit: (...a: unknown[]) => emit(...a) },
 }));
@@ -106,8 +117,8 @@ function seed(
       bookings: [],
       subjects: [{ id: 1, name: "English" }],
       profiles: [
-        { id: TUTOR, full_name: "Tutor" },
-        { id: STUDENT, full_name: "Student", status: "active" },
+        { id: TUTOR, full_name: "Tutor", role: "tutor", timezone: "Europe/Dublin" },
+        { id: STUDENT, full_name: "Student", role: "student", status: "active" },
       ],
       payments: [],
     },
@@ -115,9 +126,23 @@ function seed(
   );
 }
 
+/** Makes exactly these start times the tutor's open slots. */
+function openSlotsAt(...isoTimes: string[]) {
+  getSlots.mockImplementation(async ({ durationMinutes }: { durationMinutes: number }) =>
+    isoTimes.map((iso) => ({
+      startAt: new Date(iso),
+      endAt: new Date(Date.parse(iso) + durationMinutes * 60_000),
+    })),
+  );
+}
+
 beforeEach(() => {
   stripeConfigured = true;
   seed();
+  adminFake = null;
+  createAdminClient.mockClear();
+  getSlots.mockReset();
+  openSlotsAt(FUTURE);
   emit.mockClear();
   createCheckout.mockReset();
   createCheckout.mockResolvedValue({
@@ -157,6 +182,107 @@ describe("createBooking — authorization", () => {
 
     expect(res.error).toBe("This tutor does not offer trial lessons");
     expect(fake.db.bookings).toHaveLength(0);
+  });
+});
+
+describe("createBooking — trust boundary (migration 0029)", () => {
+  it("refuses a caller who is not a student", async () => {
+    seed({ user: TUTOR });
+
+    const res = await createBooking({}, form());
+
+    expect(res.error).toBe("Only students can book lessons");
+    expect(fake.db.bookings).toHaveLength(0);
+    expect(createCheckout).not.toHaveBeenCalled();
+  });
+
+  it("refuses a start time that is not one of the tutor's open slots", async () => {
+    // startAt is a hidden form field: one minute off a real slot is enough to
+    // prove the server no longer takes it on trust.
+    const offSlot = new Date(Date.parse(FUTURE) + 60_000).toISOString();
+
+    const res = await createBooking({}, form({ startAt: offSlot }));
+
+    expect(res.error).toBe("That time isn't one of this tutor's open slots. Please pick another.");
+    expect(fake.db.bookings).toHaveLength(0);
+    expect(createCheckout).not.toHaveBeenCalled();
+  });
+
+  it("looks slots up for the requested tutor, in the tutor's timezone and lesson length", async () => {
+    await captureRedirect(() =>
+      createBooking({}, form({ lessonType: "trial", durationMinutes: "30" })),
+    );
+
+    expect(getSlots).toHaveBeenCalledWith({
+      tutorId: TUTOR,
+      timeZone: "Europe/Dublin",
+      durationMinutes: 30,
+    });
+  });
+
+  it("inserts the booking through the service role, never the caller's session", async () => {
+    adminFake = createFakeSupabase({ bookings: [], payments: [] });
+
+    await captureRedirect(() => createBooking({}, form()));
+
+    expect(adminFake.db.bookings).toHaveLength(1);
+    expect(adminFake.db.bookings[0]).toMatchObject({
+      student_id: STUDENT,
+      tutor_id: TUTOR,
+      price_cents: 5000,
+    });
+    expect(fake.db.bookings).toHaveLength(0);
+  });
+
+  it("refuses a time entirely outside the tutor's availability", async () => {
+    // The tutor's only open slot is a full day later.
+    openSlotsAt(new Date(Date.parse(FUTURE) + 86_400_000).toISOString());
+
+    const res = await createBooking({}, form());
+
+    expect(res.error).toBe("That time isn't one of this tutor's open slots. Please pick another.");
+    expect(fake.db.bookings).toHaveLength(0);
+    expect(createCheckout).not.toHaveBeenCalled();
+  });
+
+  it("refuses a time in the past even when it is listed as an open slot", async () => {
+    const past = new Date(Date.now() - 86_400_000).toISOString();
+    openSlotsAt(past);
+
+    const res = await createBooking({}, form({ startAt: past }));
+
+    expect(res.error).toBe("Pick a time in the future");
+    expect(fake.db.bookings).toHaveLength(0);
+    expect(createCheckout).not.toHaveBeenCalled();
+  });
+
+  it("turns a slot already held by a confirmed booking (23P01) into a readable message", async () => {
+    // The slot list can be stale; the exclusion constraint is the real guard.
+    fake.control.insertError = {
+      code: "23P01",
+      message: 'conflicting key value violates exclusion constraint "bookings_no_double_booking"',
+    };
+
+    const res = await createBooking({}, form());
+
+    expect(res.error).toBe("That time was just booked by someone else — pick another slot.");
+    expect(res.error).not.toContain("exclusion constraint");
+    expect(createCheckout).not.toHaveBeenCalled();
+  });
+
+  it("never shows the raw database message when the tutor's rate changed mid-booking (42501)", async () => {
+    fake.control.insertError = {
+      code: "42501",
+      message: "booking price does not match the tutor's current rate",
+    };
+
+    const res = await createBooking({}, form());
+
+    expect(res.error).toBe(
+      "This tutor's price changed while you were booking. Please refresh and try again.",
+    );
+    expect(res.error).not.toContain("does not match");
+    expect(createCheckout).not.toHaveBeenCalled();
   });
 });
 

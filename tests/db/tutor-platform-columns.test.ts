@@ -81,6 +81,12 @@ beforeAll(async () => {
     [student, tutorConnected, subjectId],
   );
   completedBookingId = booking.rows[0].id;
+  // A reviewed lesson is a paid one: since 0029 a review requires this row.
+  await db.query(
+    `insert into public.payments (booking_id, stripe_payment_intent_id, amount_cents, status, paid_at)
+     values ($1, 'pi_completed_lesson', 5000, 'succeeded', now())`,
+    [completedBookingId],
+  );
 }, 60_000);
 
 afterAll(async () => {
@@ -405,14 +411,17 @@ describe("trusted writers are unaffected", () => {
 });
 
 describe("existing booking and payment behaviour at the database level", () => {
+  // Since 0029 bookings are created only by the server (createBooking, through
+  // the service role); a direct client insert is refused, which
+  // phase2-booking-attack-surface.test.ts pins. These exercise the server path.
   const INSERT_BOOKING = `
     insert into public.bookings
       (student_id, tutor_id, subject_id, start_at, end_at, lesson_duration_minutes, price_cents, platform_fee_cents)
     values ($1, $2, $3, $4::timestamptz, $4::timestamptz + interval '60 minutes', 60, 5000, 750)
     returning status, price_cents, platform_fee_cents`;
 
-  it("still lets a student book an approved tutor", async () => {
-    const rows = await runAs(db, user(student), INSERT_BOOKING, [
+  it("still lets the server create a booking with an approved tutor", async () => {
+    const rows = await runAs(db, serviceRole, INSERT_BOOKING, [
       student,
       tutorConnected,
       subjectId,
@@ -425,7 +434,7 @@ describe("existing booking and payment behaviour at the database level", () => {
 
   it("still rejects double-booking the same tutor slot", async () => {
     await expect(
-      as(db, user(student), async () => {
+      as(db, serviceRole, async () => {
         await db.query(INSERT_BOOKING, [student, tutorConnected, subjectId, "2030-03-04 10:00+00"]);
         await db.query(INSERT_BOOKING, [student, tutorConnected, subjectId, "2030-03-04 10:30+00"]);
       }),

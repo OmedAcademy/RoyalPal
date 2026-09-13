@@ -9,19 +9,19 @@ import {
 } from "@/tests/db/harness";
 
 /**
- * KNOWN VULNERABILITY — expected to FAIL until booking integrity (Phase 2)
- * is fixed. Not committed.
+ * Fixed by migration 0029; kept as regression tests.
  *
- * bookings_insert_own_as_student (0006) checks only student_id, and
- * enforce_booking_status_transition fires BEFORE UPDATE only, so nothing
- * inspects `status` on INSERT. reviews_insert_own_completed_booking (0008)
- * accepts a review for any of the student's bookings that is 'completed'.
- * Together: a student can mint a lesson that never happened, already
- * completed, with no payment, and review it — writing the tutor's public
- * rating through recompute_tutor_rating.
+ * Before 0029, bookings_insert_own_as_student (0006) checked only student_id,
+ * and enforce_booking_status_transition fires BEFORE UPDATE only, so nothing
+ * inspected `status` on INSERT; reviews_insert_own_completed_booking (0008)
+ * accepted a review for any of the student's bookings that was 'completed'.
+ * Together: a student could mint a lesson that never happened, already
+ * completed or confirmed, with no payment, and review it — writing the
+ * tutor's public rating through recompute_tutor_rating.
  *
- * The assertion is the SECURE behaviour, so this fails while the hole is
- * open, and the failure diff shows exactly how far the attack got.
+ * 0029 removes the client INSERT on bookings and requires a succeeded payment
+ * for a review. The assertion is the SECURE behaviour; if the hole reopens,
+ * the failure diff shows exactly how far the attack got.
  */
 
 let db: Db;

@@ -26,18 +26,16 @@ import {
  * FAILS — that failure is the documentation, not a broken test. Never invert
  * or skip one to go green; fix the hole it names.
  *
- * EXPECTED TO FAIL TODAY (24), by report finding:
- *   H1  price and fee are client-controlled ........ A1 A2 B1 C3 C4
- *   H2  status is not checked on INSERT ............ C1 C2 B7
- *   H3  booking is editable after payment .......... A3 A4 A5 A7 B2 B3 B4 B8
- *   H4  no availability check ...................... C7
- *   H5  paid lesson cancelled with no refund ....... A9 B6
- *   H6  no role / self-booking check ............... C10 (B7 is also H6)
- *   H7  database lacks the app's insert checks ..... C5 C6 C8
- *   H8  student can double-book themselves ......... C9
+ * STATUS AFTER MIGRATION 0029 (with createBooking inserting via the service role):
+ *   Closed by 0029 .......... A1-A5 A7 B1-B4 B7 B8 C1-C10
+ *     H1 price/fee, H2 insert status, H3 post-payment edits, H6 role check and
+ *     H7 insert checks: clients can no longer INSERT, and every column except
+ *     status and cancellation_reason is locked after insert.
+ *   STILL EXPECTED TO FAIL (2):
+ *     H5  paid lesson cancelled with no refund ..... A9 B6
  *
- * EXPECTED TO PASS TODAY (6) — already refused, pinned so they stay refused:
- *   A6 B5  RLS WITH CHECK on bookings (42501)
+ * Refused before 0029 and still refused, pinned so they stay refused:
+ *   A6 B5  now by the 0029 column-lock trigger, ahead of RLS WITH CHECK (42501)
  *   A8 B9  booking status transition trigger (P0001)
  *   D1 D2  no client write grant on payments (42501)
  *
@@ -45,12 +43,11 @@ import {
  *   - A9/B6 assume a participant cannot simply set a PAID lesson to
  *     cancelled. The refund policy (H5) is not decided; revisit these when it
  *     is.
- *   - C9 assumes a student may not hold two lessons at once — a product
- *     decision (H8).
- *   - C3–C10 insert directly. Removing the client INSERT path (the H2 option
- *     under consideration) turns them green together; a trigger-only fix
- *     would still leave C6, C7 and C9 needing their own rules, and C7 (H4)
- *     also needs the server-side availability check in createBooking.
+ *   - C9 is refused because clients cannot insert at all. createBooking itself
+ *     does not stop a student holding two lessons at once; that is still a
+ *     product decision (H8).
+ *   - C7 proves only that a direct insert is refused. The availability check
+ *     itself lives in createBooking and is tested in lib/actions/booking.test.ts.
  */
 
 /**
@@ -253,12 +250,28 @@ describe("A · student, on their own confirmed and paid booking", () => {
     );
   });
 
-  it("A6 cannot transfer ownership via student_id (already refused by RLS)", async () => {
-    await expectRefusedWith(
-      updateBookingAs(student, paidBooking, "student_id = $2", [otherStudent]),
-      "42501",
-      /new row violates row-level security policy for table "bookings"/,
-    );
+  it("A6 cannot transfer ownership via student_id (already refused)", async () => {
+    // Since 0029 the refusal comes from the column-lock trigger, ahead of RLS WITH CHECK.
+    const { err, before, after } = await as(db, user(student), async () => {
+      const read = async () =>
+        (await db.query("select * from public.bookings where id = $1", [paidBooking])).rows[0];
+      const before = await read();
+      let err: PgError | undefined;
+      await db.exec("savepoint attempt");
+      try {
+        await db.query("update public.bookings set student_id = $2 where id = $1", [
+          paidBooking,
+          otherStudent,
+        ]);
+      } catch (e) {
+        err = e as PgError;
+        await db.exec("rollback to savepoint attempt");
+      }
+      // Read in the SAME transaction: a write that got through is visible here.
+      return { err, before, after: await read() };
+    });
+    expect.soft(err, "the write was not refused").toMatchObject({ code: "42501" });
+    expect.soft(after, "the row changed").toEqual(before);
   });
 
   it("A7 cannot swap meeting_url after payment [H3]", async () => {
@@ -307,12 +320,28 @@ describe("B · tutor, on a paid booking they teach", () => {
     );
   });
 
-  it("B5 cannot hand the booking to another tutor via tutor_id (already refused by RLS)", async () => {
-    await expectRefusedWith(
-      updateBookingAs(tutor, paidBooking, "tutor_id = $2", [otherTutor]),
-      "42501",
-      /new row violates row-level security policy for table "bookings"/,
-    );
+  it("B5 cannot hand the booking to another tutor via tutor_id (already refused)", async () => {
+    // Since 0029 the refusal comes from the column-lock trigger, ahead of RLS WITH CHECK.
+    const { err, before, after } = await as(db, user(tutor), async () => {
+      const read = async () =>
+        (await db.query("select * from public.bookings where id = $1", [paidBooking])).rows[0];
+      const before = await read();
+      let err: PgError | undefined;
+      await db.exec("savepoint attempt");
+      try {
+        await db.query("update public.bookings set tutor_id = $2 where id = $1", [
+          paidBooking,
+          otherTutor,
+        ]);
+      } catch (e) {
+        err = e as PgError;
+        await db.exec("rollback to savepoint attempt");
+      }
+      // Read in the SAME transaction: a write that got through is visible here.
+      return { err, before, after: await read() };
+    });
+    expect.soft(err, "the write was not refused").toMatchObject({ code: "42501" });
+    expect.soft(after, "the row changed").toEqual(before);
   });
 
   it("B6 cannot set a paid lesson to cancelled directly [H5, policy undecided]", async () => {
