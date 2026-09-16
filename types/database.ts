@@ -1,7 +1,12 @@
 /**
- * Hand-authored to match supabase/migrations/0001-0010 exactly.
+ * Hand-authored to match supabase/migrations/0001-0019 exactly.
  * Once a real Supabase project exists, regenerate and diff against this file with:
  *   npx supabase gen types typescript --project-id <project-id> --schema public
+ *
+ * Every table includes `Relationships: []` and the schema includes empty
+ * Views/Functions maps — required by @supabase/postgrest-js's GenericTable/
+ * GenericSchema constraints for row-type inference to resolve correctly.
+ * Omitting them silently degrades query results to `never`.
  */
 
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
@@ -9,9 +14,15 @@ export type Json = string | number | boolean | null | { [key: string]: Json | un
 export type UserRole = "student" | "tutor" | "admin";
 export type UserStatus = "active" | "suspended";
 export type TutorVerificationStatus = "pending" | "approved" | "rejected";
+export type EnglishLevel = "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
 export type BookingStatus =
   "pending_payment" | "confirmed" | "completed" | "cancelled" | "refunded";
-export type PaymentStatus = "requires_payment" | "succeeded" | "failed" | "refunded";
+export type PaymentStatus = "requires_payment" | "succeeded" | "failed" | "refunded" | "expired";
+/** Tutor-payout state (migration 0024). Null = no transfer applies, i.e. the
+ * lesson was a plain platform charge because the tutor had not completed
+ * Connect onboarding. Distinct from PaymentStatus, which is the student's
+ * charge. */
+export type TransferStatus = "paid" | "reversed";
 
 export interface Database {
   public: {
@@ -22,6 +33,7 @@ export interface Database {
           role: UserRole;
           full_name: string;
           avatar_url: string | null;
+          country: string | null;
           timezone: string;
           phone: string | null;
           status: UserStatus;
@@ -33,6 +45,7 @@ export interface Database {
           role: UserRole;
           full_name: string;
           avatar_url?: string | null;
+          country?: string | null;
           timezone?: string;
           phone?: string | null;
           status?: UserStatus;
@@ -40,23 +53,29 @@ export interface Database {
           updated_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["profiles"]["Insert"]>;
+        Relationships: [];
       };
       student_profiles: {
         Row: {
           id: string;
           learning_goals: string | null;
-          preferred_languages: string[] | null;
+          target_languages: string[] | null;
+          native_language: string | null;
+          english_level: EnglishLevel | null;
           created_at: string;
           updated_at: string;
         };
         Insert: {
           id: string;
           learning_goals?: string | null;
-          preferred_languages?: string[] | null;
+          target_languages?: string[] | null;
+          native_language?: string | null;
+          english_level?: EnglishLevel | null;
           created_at?: string;
           updated_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["student_profiles"]["Insert"]>;
+        Relationships: [];
       };
       tutor_profiles: {
         Row: {
@@ -65,13 +84,34 @@ export interface Database {
           bio: string;
           video_url: string | null;
           hourly_rate_cents: number;
+          trial_price_cents: number | null;
           currency: string;
-          languages: string[];
+          languages_spoken: string[];
+          teaching_languages: string[];
+          specializations: string[];
+          years_experience: number | null;
+          certifications: string[];
+          education: string | null;
+          availability_note: string | null;
           verification_status: TutorVerificationStatus;
           avg_rating: number | null;
           total_reviews: number;
           stripe_account_id: string | null;
           stripe_charges_enabled: boolean;
+          /** Fuller Connect state (migration 0026). Mirrors of Stripe's own
+           * account object, meant to be written only by the account.updated
+           * webhook. Migration 0028 enforces that in the database, but it is
+           * NOT applied to production (as of 10 September 2026): there a
+           * tutor can still write these columns directly.
+           * charges_enabled and payouts_enabled are deliberately separate:
+           * an account can take charges while its bank payouts are paused. */
+          stripe_payouts_enabled: boolean;
+          stripe_details_submitted: boolean;
+          stripe_requirements_due: string[];
+          stripe_disabled_reason: string | null;
+          /** Per-tutor commission override in basis points (migration 0025).
+           * Null = use the platform rate. See lib/pricing/commission.ts. */
+          platform_fee_bps: number | null;
           created_at: string;
           updated_at: string;
         };
@@ -81,17 +121,30 @@ export interface Database {
           bio: string;
           video_url?: string | null;
           hourly_rate_cents: number;
+          trial_price_cents?: number | null;
           currency?: string;
-          languages?: string[];
+          languages_spoken?: string[];
+          teaching_languages?: string[];
+          specializations?: string[];
+          years_experience?: number | null;
+          certifications?: string[];
+          education?: string | null;
+          availability_note?: string | null;
           verification_status?: TutorVerificationStatus;
           avg_rating?: number | null;
           total_reviews?: number;
           stripe_account_id?: string | null;
           stripe_charges_enabled?: boolean;
+          stripe_payouts_enabled?: boolean;
+          stripe_details_submitted?: boolean;
+          stripe_requirements_due?: string[];
+          stripe_disabled_reason?: string | null;
+          platform_fee_bps?: number | null;
           created_at?: string;
           updated_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["tutor_profiles"]["Insert"]>;
+        Relationships: [];
       };
       subjects: {
         Row: {
@@ -107,6 +160,7 @@ export interface Database {
           slug: string;
         };
         Update: Partial<Database["public"]["Tables"]["subjects"]["Insert"]>;
+        Relationships: [];
       };
       tutor_subjects: {
         Row: {
@@ -118,6 +172,7 @@ export interface Database {
           subject_id: number;
         };
         Update: Partial<Database["public"]["Tables"]["tutor_subjects"]["Insert"]>;
+        Relationships: [];
       };
       availability_rules: {
         Row: {
@@ -137,6 +192,7 @@ export interface Database {
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["availability_rules"]["Insert"]>;
+        Relationships: [];
       };
       availability_exceptions: {
         Row: {
@@ -158,6 +214,7 @@ export interface Database {
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["availability_exceptions"]["Insert"]>;
+        Relationships: [];
       };
       bookings: {
         Row: {
@@ -170,6 +227,13 @@ export interface Database {
           lesson_duration_minutes: number;
           status: BookingStatus;
           meeting_link: string | null;
+          // Live-classroom fields (migration 0022). Written exclusively by
+          // MeetingService via the service role.
+          meeting_provider: string | null;
+          meeting_url: string | null;
+          meeting_id: string | null;
+          calendar_event_id: string | null;
+          meeting_status: string;
           price_cents: number;
           platform_fee_cents: number;
           currency: string;
@@ -187,6 +251,11 @@ export interface Database {
           lesson_duration_minutes?: number;
           status?: BookingStatus;
           meeting_link?: string | null;
+          meeting_provider?: string | null;
+          meeting_url?: string | null;
+          meeting_id?: string | null;
+          calendar_event_id?: string | null;
+          meeting_status?: string;
           price_cents: number;
           platform_fee_cents: number;
           currency?: string;
@@ -195,27 +264,46 @@ export interface Database {
           updated_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["bookings"]["Insert"]>;
+        Relationships: [];
       };
       payments: {
         Row: {
           id: string;
           booking_id: string;
-          stripe_payment_intent_id: string;
+          stripe_payment_intent_id: string | null;
+          checkout_session_id: string | null;
           amount_cents: number;
           status: PaymentStatus;
           currency: string;
+          paid_at: string | null;
           created_at: string;
+          // Migration 0024. Tutor-payout and dispute state, independent of
+          // `status` (which tracks the student's charge). Written only by
+          // the Stripe webhook handlers.
+          stripe_transfer_id: string | null;
+          transfer_status: TransferStatus | null;
+          transfer_status_reason: string | null;
+          stripe_dispute_id: string | null;
+          dispute_status: string | null;
         };
         Insert: {
           id?: string;
           booking_id: string;
-          stripe_payment_intent_id: string;
+          stripe_payment_intent_id?: string | null;
+          checkout_session_id?: string | null;
           amount_cents: number;
           status?: PaymentStatus;
           currency?: string;
+          paid_at?: string | null;
           created_at?: string;
+          stripe_transfer_id?: string | null;
+          transfer_status?: TransferStatus | null;
+          transfer_status_reason?: string | null;
+          stripe_dispute_id?: string | null;
+          dispute_status?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["payments"]["Insert"]>;
+        Relationships: [];
       };
       reviews: {
         Row: {
@@ -237,6 +325,7 @@ export interface Database {
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["reviews"]["Insert"]>;
+        Relationships: [];
       };
       favorites: {
         Row: {
@@ -250,6 +339,7 @@ export interface Database {
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["favorites"]["Insert"]>;
+        Relationships: [];
       };
       admin_actions: {
         Row: {
@@ -269,14 +359,71 @@ export interface Database {
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["admin_actions"]["Insert"]>;
+        Relationships: [];
+      };
+      notifications: {
+        Row: {
+          id: string;
+          user_id: string;
+          type: string;
+          category: string;
+          title: string;
+          body: string | null;
+          data: Json;
+          read_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          type: string;
+          category?: string;
+          title: string;
+          body?: string | null;
+          data?: Json;
+          read_at?: string | null;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["notifications"]["Insert"]>;
+        Relationships: [];
+      };
+      stripe_events: {
+        Row: {
+          id: string;
+          type: string;
+          payload: Json;
+          processed_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id: string;
+          type: string;
+          payload: Json;
+          processed_at?: string | null;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["stripe_events"]["Insert"]>;
+        Relationships: [];
       };
     };
+    Views: {
+      review_authors: {
+        Row: {
+          id: string;
+          full_name: string;
+          avatar_url: string | null;
+        };
+        Relationships: [];
+      };
+    };
+    Functions: Record<string, never>;
     Enums: {
       user_role: UserRole;
       user_status: UserStatus;
       tutor_verification_status: TutorVerificationStatus;
       booking_status: BookingStatus;
       payment_status: PaymentStatus;
+      english_level: EnglishLevel;
     };
   };
 }
@@ -285,6 +432,9 @@ export type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 export type StudentProfile = Database["public"]["Tables"]["student_profiles"]["Row"];
 export type TutorProfile = Database["public"]["Tables"]["tutor_profiles"]["Row"];
 export type Subject = Database["public"]["Tables"]["subjects"]["Row"];
+export type AvailabilityRule = Database["public"]["Tables"]["availability_rules"]["Row"];
+export type AvailabilityException = Database["public"]["Tables"]["availability_exceptions"]["Row"];
 export type Booking = Database["public"]["Tables"]["bookings"]["Row"];
 export type Payment = Database["public"]["Tables"]["payments"]["Row"];
 export type Review = Database["public"]["Tables"]["reviews"]["Row"];
+export type StripeEvent = Database["public"]["Tables"]["stripe_events"]["Row"];
