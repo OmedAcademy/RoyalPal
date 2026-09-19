@@ -163,11 +163,17 @@ npx eas build --platform android --profile production
 These are real, deliberate, and visible in the UI rather than behind a button
 that looks native and is not:
 
-| Gap                       | Where it shows                 | Why                                                                                                        |
-| ------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| Profile editing           | "Edit profile on the web"      | The tutor form has 14 fields with interdependent validation; a second copy is a second copy of those rules |
-| Availability editing      | "Edit availability on the web" | Same reasoning; the app shows the weekly rules read-only                                                   |
-| Reschedule                | Web only                       | The action and API exist; the native slot picker does not                                                  |
-| Leaving a review          | Web only                       |                                                                                                            |
-| Admin                     | Web only, by design            | An admin console on a phone is not a product requirement                                                   |
-| Password reset completion | Opens a browser                | The emailed link targets the web callback; the app says so instead of appearing to handle it               |
+| Gap                       | Where it shows            | Why                                                                                          |
+| ------------------------- | ------------------------- | -------------------------------------------------------------------------------------------- |
+| Avatar upload             | "Change photo on the web" | Needs an image picker and a direct-to-storage upload; everything else on the form is native  |
+| Date exceptions           | Read-only on the app      | The weekly template is editable natively; one-off date overrides are still a web surface     |
+| Account deletion          | "Account and deletion"    | Deliberately not a two-tap action on a phone                                                 |
+| Admin                     | Web only, by design       | An admin console on a phone is not a product requirement                                     |
+| Password reset completion | Opens a browser           | The emailed link targets the web callback; the app says so instead of appearing to handle it |
+
+Closed since the first cut, and now native: profile editing (`app/profile/edit.tsx`),
+weekly availability (`app/availability/edit.tsx`), rescheduling
+(`app/reschedule/[id].tsx`) and leaving a review (`app/review/[id].tsx`). Each
+posts to a `/api/v1` route that invokes the **same Server Action the web form
+posts to**, so the Zod schema, the column allowlist and the privileged-column
+locks have one implementation rather than two.

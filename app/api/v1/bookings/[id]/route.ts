@@ -32,7 +32,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       .from("bookings")
       .select(
         `id, student_id, tutor_id, status, start_at, end_at, price_cents, currency,
-         meeting_url, meeting_status, cancellation_reason,
+         lesson_duration_minutes, meeting_url, meeting_status, cancellation_reason,
          subjects(name),
          student:profiles!bookings_student_id_fkey(full_name),
          tutor:profiles!bookings_tutor_id_fkey(full_name)`,
@@ -51,6 +51,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       status: BookingStatus;
       start_at: string;
       end_at: string;
+      lesson_duration_minutes: number;
       price_cents: number;
       currency: string;
       meeting_url: string | null;
@@ -65,11 +66,14 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     const canCancel = isCancellable(row.status);
     const hoursUntilStart = (new Date(row.start_at).getTime() - Date.now()) / 3_600_000;
 
-    const { data: conversation } = await supabase
-      .from("conversations")
-      .select("id")
-      .eq("booking_id", row.id)
-      .maybeSingle();
+    const [{ data: conversation }, { data: existingReview }] = await Promise.all([
+      supabase.from("conversations").select("id").eq("booking_id", row.id).maybeSingle(),
+      // RLS lets a student see their own review; a tutor sees reviews about
+      // them. Either way "has this been reviewed" is answered by whether the
+      // row is visible, which is the same question the web bookings list asks.
+      supabase.from("reviews").select("id").eq("booking_id", row.id).maybeSingle(),
+    ]);
+    const reviewed = Boolean(existingReview);
 
     const preview = canCancel
       ? resolveCancellation({
@@ -83,6 +87,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     return apiOk({
       booking: {
         id: row.id,
+        // Needed by the reschedule screen to load the tutor's open slots, and
+        // by the review screen to attribute the review.
+        tutor_id: row.tutor_id,
+        lesson_duration_minutes: row.lesson_duration_minutes,
+        reviewed: reviewed,
         status: row.status,
         start_at: row.start_at,
         end_at: row.end_at,

@@ -103,14 +103,33 @@ export async function handle<T>(
  * the target is caught and handed back as a URL for the app to open. That is
  * how createBooking's checkout hand-off reaches a phone.
  */
+export type ActionValue = string | number | boolean | null | undefined | (string | number)[];
+
 export async function invokeAction<S extends { error?: string; message?: string }>(
   action: (prev: S, formData: FormData) => Promise<S>,
-  values: Record<string, string | number | null | undefined>,
+  values: Record<string, ActionValue>,
   initial: S,
 ): Promise<{ state: S } | { redirectTo: string }> {
   const formData = new FormData();
   for (const [key, value] of Object.entries(values)) {
-    if (value !== null && value !== undefined) formData.set(key, String(value));
+    if (value === null || value === undefined) continue;
+
+    // An array APPENDS under one key, which is what formData.getAll() reads
+    // and what a multi-select or a repeating row group posts. Setting a joined
+    // string instead would arrive as one value containing commas — the
+    // difference between "English, Spanish" as two languages and as the name
+    // of one.
+    if (Array.isArray(value)) {
+      for (const item of value) formData.append(key, String(item));
+      // An EMPTY array still has to be expressible: "the tutor removed their
+      // last availability row" and "the client did not mention availability"
+      // are different requests, and getAll() cannot tell them apart. The
+      // sentinel is read by the routes that accept list replacement.
+      if (value.length === 0) formData.set(`${key}__empty`, "1");
+      continue;
+    }
+
+    formData.set(key, String(value));
   }
 
   try {

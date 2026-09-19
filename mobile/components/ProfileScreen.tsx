@@ -9,11 +9,13 @@ const WEB = process.env.EXPO_PUBLIC_API_URL ?? "";
 /**
  * Profile and settings, shared by both roles.
  *
- * Profile EDITING opens the web app rather than being reimplemented here. That
- * is a deliberate scope decision, not an oversight: the tutor profile form has
- * fourteen fields with interdependent validation, and a second copy of it is a
- * second copy of those rules. It is called out in docs/MOBILE.md as the known
- * gap rather than hidden behind a button that looks native and is not.
+ * Profile editing is native (app/profile/edit.tsx) and posts to
+ * PUT /api/v1/profile, which runs the same Server Action the web form posts
+ * to — so there is one copy of the validation rules, on the server.
+ *
+ * Two things still open the web: the avatar, which needs an image picker and a
+ * direct-to-storage upload, and account deletion, which is deliberately not a
+ * two-tap action on a phone. Both say so on the button.
  */
 export function ProfileScreen() {
   const palette = usePalette();
@@ -26,8 +28,6 @@ export function ProfileScreen() {
     ]);
   }
 
-  const profilePath = me?.profile.role === "tutor" ? "/tutor/profile" : "/student/profile";
-
   return (
     <Screen>
       <Heading>Profile</Heading>
@@ -39,8 +39,18 @@ export function ProfileScreen() {
         <Body muted>
           {me?.profile.role === "tutor" ? "Tutor" : "Student"} · {me?.profile.timezone ?? "UTC"}
         </Body>
-        <Button variant="secondary" onPress={() => Linking.openURL(`${WEB}${profilePath}`)}>
-          Edit profile on the web
+        <Button variant="secondary" onPress={() => router.push("/profile/edit")}>
+          Edit profile
+        </Button>
+        <Button
+          variant="secondary"
+          onPress={() =>
+            Linking.openURL(
+              `${WEB}${me?.profile.role === "tutor" ? "/tutor/profile" : "/student/profile"}`,
+            )
+          }
+        >
+          Change photo on the web
         </Button>
       </Card>
 
@@ -55,7 +65,7 @@ export function ProfileScreen() {
         </Button>
         <Divider />
         <Button variant="secondary" onPress={() => Linking.openURL(`${WEB}/settings/account`)}>
-          Account and deletion
+          Account and deletion (web)
         </Button>
       </Card>
 

@@ -15,6 +15,7 @@ import {
   EmptyState,
   usePalette,
 } from "@/components/ui";
+import { SlotPicker } from "@/components/SlotPicker";
 import { formatMoney } from "@/lib/format";
 import { spacing, radius, MIN_TOUCH_TARGET } from "@/lib/theme";
 import type { AvailabilityDay, TutorSummary } from "@/lib/api";
@@ -195,40 +196,7 @@ export default function BookLessonScreen() {
             message="This tutor has no availability at the moment. Try again later or save them for when they do."
           />
         ) : (
-          slotsState.data!.days.map((day) => (
-            <View key={day.date} style={{ gap: spacing.sm }}>
-              <Text style={{ fontSize: 12, fontWeight: "700", color: palette.muted }}>
-                {day.label.toUpperCase()}
-              </Text>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm }}>
-                {day.slots.map((option) => {
-                  const active = slot === option.startAt;
-                  return (
-                    <Pressable
-                      key={option.startAt}
-                      onPress={() => setSlot(option.startAt)}
-                      accessibilityRole="radio"
-                      accessibilityState={{ selected: active }}
-                      accessibilityLabel={`${day.label} at ${option.label}`}
-                      style={{
-                        minHeight: MIN_TOUCH_TARGET,
-                        paddingHorizontal: spacing.lg,
-                        justifyContent: "center",
-                        borderRadius: radius.pill,
-                        borderWidth: 1,
-                        borderColor: active ? palette.royal : palette.hairlineStrong,
-                        backgroundColor: active ? palette.royal : "transparent",
-                      }}
-                    >
-                      <Text style={{ color: active ? palette.royalContrast : palette.foreground }}>
-                        {option.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
-          ))
+          <SlotPicker days={slotsState.data!.days} selected={slot} onSelect={setSlot} />
         )}
       </Card>
 

@@ -42,6 +42,28 @@ describe("invokeAction", () => {
     expect(formData.has("missing")).toBe(false);
   });
 
+  it("appends arrays under one key, so getAll() sees a list", async () => {
+    const action = vi.fn(async (_prev: typeof initial, _formData: FormData) => ({}));
+    await invokeAction(action, { languages: ["en", "es", "ku"] }, initial);
+
+    const formData = action.mock.calls[0][1];
+    // Not "en,es,ku" as a single value — that is one language with commas in
+    // its name as far as the schema is concerned.
+    expect(formData.getAll("languages")).toEqual(["en", "es", "ku"]);
+  });
+
+  it("marks an empty array, because getAll() cannot distinguish it from absent", async () => {
+    const action = vi.fn(async (_prev: typeof initial, _formData: FormData) => ({}));
+    await invokeAction(action, { dayOfWeek: [] }, initial);
+
+    const formData = action.mock.calls[0][1];
+    expect(formData.getAll("dayOfWeek")).toEqual([]);
+    // "the tutor deleted their last availability row" vs "availability was not
+    // part of this request" are different intentions and must stay tellable
+    // apart.
+    expect(formData.get("dayOfWeek__empty")).toBe("1");
+  });
+
   it("extracts the destination from a thrown redirect carrying `url`", async () => {
     const action = vi.fn(async () => {
       throw Object.assign(new Error("NEXT_REDIRECT"), { url: "https://checkout.test/session" });

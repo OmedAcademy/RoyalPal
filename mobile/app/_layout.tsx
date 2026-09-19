@@ -71,6 +71,19 @@ function AuthGate() {
       <Stack.Screen name="tutor/[id]" options={{ headerShown: true, title: "Tutor" }} />
       <Stack.Screen name="book/[id]" options={{ headerShown: true, title: "Book a lesson" }} />
       <Stack.Screen name="messages/[id]" options={{ headerShown: true, title: "Conversation" }} />
+      <Stack.Screen name="lesson/[id]" options={{ headerShown: true, title: "Lesson" }} />
+      <Stack.Screen
+        name="reschedule/[id]"
+        options={{ headerShown: true, title: "Move this lesson" }}
+      />
+      <Stack.Screen name="review/[id]" options={{ headerShown: true, title: "Leave a review" }} />
+      <Stack.Screen name="profile/edit" options={{ headerShown: true, title: "Edit profile" }} />
+      <Stack.Screen
+        name="availability/edit"
+        options={{ headerShown: true, title: "Availability" }}
+      />
+      <Stack.Screen name="saved" options={{ headerShown: true, title: "Saved tutors" }} />
+      <Stack.Screen name="support" options={{ headerShown: true, title: "Help and support" }} />
       <Stack.Screen name="notifications" options={{ headerShown: true, title: "Notifications" }} />
       <Stack.Screen name="suspended" options={{ headerShown: false }} />
     </Stack>

@@ -19,7 +19,11 @@ import { spacing } from "@/lib/theme";
 import type { Booking } from "@/lib/api";
 
 type Response = {
-  booking: Booking & { conversation_id: string | null; cancellation_reason: string | null };
+  booking: Booking & {
+    conversation_id: string | null;
+    cancellation_reason: string | null;
+    reviewed: boolean;
+  };
   timezone: string;
   viewerRole: "student" | "tutor";
   canCancel: boolean;
@@ -50,7 +54,9 @@ export default function LessonScreen() {
     );
   }
 
-  const { booking, timezone, viewerRole, canCancel, cancellationPreview } = state.data;
+  const { booking, timezone, viewerRole, canCancel, canReschedule, cancellationPreview } =
+    state.data;
+  const canReview = viewerRole === "student" && booking.status === "completed" && !booking.reviewed;
   const other = viewerRole === "student" ? booking.tutor_name : booking.student_name;
 
   function confirmCancel() {
@@ -118,6 +124,16 @@ export default function LessonScreen() {
           onPress={() => router.push(`/messages/${booking.conversation_id}`)}
         >
           Message {other}
+        </Button>
+      ) : null}
+
+      {canReview ? (
+        <Button onPress={() => router.push(`/review/${booking.id}`)}>Leave a review</Button>
+      ) : null}
+
+      {canReschedule ? (
+        <Button variant="secondary" onPress={() => router.push(`/reschedule/${booking.id}`)}>
+          Move to another time
         </Button>
       ) : null}
 

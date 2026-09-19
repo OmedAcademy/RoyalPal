@@ -1,4 +1,5 @@
-import { View, Text, Linking } from "react-native";
+import { View, Text } from "react-native";
+import { router } from "expo-router";
 import { useAuth } from "@/lib/auth";
 import { useApi } from "@/lib/useApi";
 import {
@@ -15,8 +16,6 @@ import {
 import { formatDateIn, formatTimeIn, timeZoneLabel } from "@/lib/format";
 import { spacing } from "@/lib/theme";
 import type { Booking } from "@/lib/api";
-
-const WEB = process.env.EXPO_PUBLIC_API_URL ?? "";
 
 type BookingsResponse = { bookings: Booking[]; timezone: string };
 type AvailabilityResponse = {
@@ -123,11 +122,8 @@ export default function TutorCalendarScreen() {
         ) : (
           <Body muted>You haven&apos;t set any availability yet, so nobody can book you.</Body>
         )}
-        {/* Editing the weekly grid is a web-only surface for now, and saying so
-            is better than a native-looking button that opens a browser without
-            warning. Tracked as a known gap in docs/MOBILE.md. */}
-        <Button variant="secondary" onPress={() => Linking.openURL(`${WEB}/tutor/availability`)}>
-          Edit availability on the web
+        <Button variant="secondary" onPress={() => router.push("/availability/edit")}>
+          Edit availability
         </Button>
       </Card>
     </Screen>
