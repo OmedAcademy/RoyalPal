@@ -26,13 +26,34 @@ export type TutorSearchFilters = {
   subjectId?: number;
   language?: string;
   maxPrice?: number;
-  /** Hard cap on rows returned. Always bounded so a growing tutor base can
-   * never turn a listing into an unbounded scan. */
-  limit?: number;
+  /** ISO 3166 alpha-2, matched against the tutor's own profile country. */
+  country?: string;
+  /** Free text, matched against name and headline. */
+  q?: string;
+  /** Rows per page. Bounded so a caller cannot ask for the whole table. */
+  pageSize?: number;
+  /** Zero-based page index. */
+  page?: number;
 };
 
-/** Safety ceiling applied when a caller doesn't specify one. */
-const DEFAULT_SEARCH_LIMIT = 60;
+export type TutorSearchPage = {
+  tutors: TutorSearchResult[];
+  page: number;
+  pageSize: number;
+  /** Total matching rows, so a UI can show "1-20 of 137" and a last page. */
+  total: number;
+  hasMore: boolean;
+};
+
+/**
+ * Page size when a caller does not say. The old behaviour was a hard cap of 60
+ * rows with no way past it — which is not a safety limit, it is a silent
+ * truncation: the 61st tutor to join became invisible to search with nothing
+ * anywhere saying so. A bounded page plus a total and a cursor is the version
+ * that stays safe AND stays honest as the tutor base grows.
+ */
+const DEFAULT_PAGE_SIZE = 20;
+const MAX_PAGE_SIZE = 50;
 
 type RawTutorRow = {
   id: string;
@@ -80,8 +101,15 @@ function normalizeTutorRow(row: RawTutorRow): TutorSearchResult {
 /** Approved tutors only, matching tutor_profiles' public-visibility RLS
  * policy — search results and the anon-blocked profile join both depend on
  * verification_status = 'approved'. */
-export async function searchTutors(filters: TutorSearchFilters): Promise<TutorSearchResult[]> {
+export async function searchTutors(filters: TutorSearchFilters): Promise<TutorSearchPage> {
   const supabase = await createClient();
+
+  const pageSize = Math.min(Math.max(filters.pageSize ?? DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
+  const page = Math.max(filters.page ?? 0, 0);
+  const from = page * pageSize;
+  const to = from + pageSize - 1;
+
+  const empty: TutorSearchPage = { tutors: [], page, pageSize, total: 0, hasMore: false };
 
   // Filtering by subject via a resolved id list, rather than an embedded
   // `tutor_subjects!inner` filter, avoids relying on PostgREST's
@@ -96,16 +124,45 @@ export async function searchTutors(filters: TutorSearchFilters): Promise<TutorSe
     if (error) throw error;
 
     tutorIds = (matches ?? []).map((m) => m.tutor_id);
-    if (tutorIds.length === 0) return [];
+    if (tutorIds.length === 0) return empty;
+  }
+
+  // Country and free-text name live on `profiles`, not `tutor_profiles`, so
+  // they are resolved to an id set first and intersected. Doing it this way
+  // rather than filtering on the embedded profiles row avoids PostgREST
+  // returning a tutor with a null embed instead of excluding them.
+  if (filters.country || filters.q) {
+    let profileQuery = supabase.from("profiles").select("id").eq("role", "tutor");
+    if (filters.country) profileQuery = profileQuery.eq("country", filters.country);
+    if (filters.q) profileQuery = profileQuery.ilike("full_name", `%${escapeLike(filters.q)}%`);
+
+    const { data: profileMatches, error } = await profileQuery.limit(1000);
+    if (error) throw error;
+
+    const matchedIds = new Set((profileMatches ?? []).map((row) => row.id));
+
+    // A free-text query should also match a headline, which lives on
+    // tutor_profiles — so the two id sets are unioned rather than intersected.
+    if (filters.q) {
+      const { data: headlineMatches } = await supabase
+        .from("tutor_profiles")
+        .select("id")
+        .ilike("headline", `%${escapeLike(filters.q)}%`)
+        .limit(1000);
+      for (const row of headlineMatches ?? []) matchedIds.add(row.id);
+    }
+
+    tutorIds = tutorIds ? tutorIds.filter((id) => matchedIds.has(id)) : [...matchedIds];
+    if (tutorIds.length === 0) return empty;
   }
 
   let query = supabase
     .from("tutor_profiles")
-    .select(TUTOR_SELECT)
+    .select(TUTOR_SELECT, { count: "exact" })
     .eq("verification_status", "approved")
     .order("avg_rating", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
-    .limit(filters.limit ?? DEFAULT_SEARCH_LIMIT);
+    .range(from, to);
 
   if (tutorIds) {
     query = query.in("id", tutorIds);
@@ -117,10 +174,28 @@ export async function searchTutors(filters: TutorSearchFilters): Promise<TutorSe
     query = query.lte("hourly_rate_cents", Math.round(filters.maxPrice * 100));
   }
 
-  const { data, error } = await query.returns<RawTutorRow[]>();
+  const { data, error, count } = await query.returns<RawTutorRow[]>();
   if (error) throw error;
 
-  return (data ?? []).map(normalizeTutorRow);
+  const total = count ?? 0;
+  return {
+    tutors: (data ?? []).map(normalizeTutorRow),
+    page,
+    pageSize,
+    total,
+    hasMore: from + (data?.length ?? 0) < total,
+  };
+}
+
+/**
+ * Escapes the wildcards PostgREST's ilike treats as special.
+ *
+ * Without this a search for "100%" matches every tutor, and a search for "_"
+ * matches all of them too — not a security hole, since the value is still
+ * parameterised, but a search box that silently ignores what was typed.
+ */
+function escapeLike(value: string): string {
+  return value.replace(/[%_\\]/g, (match) => `\\${match}`).slice(0, 100);
 }
 
 /** Loads specific approved tutors by id (order not guaranteed). Used by the

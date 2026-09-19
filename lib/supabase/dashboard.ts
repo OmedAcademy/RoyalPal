@@ -96,7 +96,7 @@ export async function getStudentDashboard(userId: string): Promise<StudentDashbo
     supabase.from("favorites").select("tutor_id").eq("student_id", userId),
     // Bounded: we render at most 6, and over-fetch slightly so filtering out
     // favourites can't empty the row.
-    searchTutors({ limit: 12 }),
+    searchTutors({ pageSize: 12 }),
   ]);
 
   const favoriteIds = (favoriteRows.data ?? []).map((f) => f.tutor_id);
@@ -123,7 +123,7 @@ export async function getStudentDashboard(userId: string): Promise<StudentDashbo
     .filter((b) => b.status === "confirmed" || b.status === "completed")
     .sort(byRecent);
 
-  const recommended = recommendedAll.filter((t) => !favoriteIdSet.has(t.id)).slice(0, 6);
+  const recommended = recommendedAll.tutors.filter((t) => !favoriteIdSet.has(t.id)).slice(0, 6);
 
   return { nextLesson, upcoming, history, toReview, payments, favorites, recommended };
 }
