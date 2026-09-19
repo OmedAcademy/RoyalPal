@@ -4,7 +4,9 @@ import { RetryPaymentButton } from "@/components/booking/RetryPaymentButton";
 import { ReviewForm } from "@/components/review/ReviewForm";
 import { BOOKING_STATUS_LABELS, BOOKING_STATUS_STYLES } from "@/lib/utils/booking-status";
 import { formatMoney } from "@/lib/utils/format";
+import Link from "next/link";
 import { safeExternalUrl } from "@/lib/utils/url";
+import { FREE_CANCELLATION_HOURS } from "@/lib/booking/cancellation-policy";
 
 export function BookingCard({
   booking,
@@ -25,6 +27,11 @@ export function BookingCard({
   const canRetryPayment =
     viewerRole === "student" && booking.status === "pending_payment" && isUpcoming;
   const canReview = viewerRole === "student" && booking.status === "completed" && !booking.reviewed;
+  // Same notice as the free-cancellation window, so moving a lesson can never
+  // be used to walk around the cancellation policy — see
+  // RESCHEDULE_MIN_NOTICE_HOURS in lib/actions/booking.ts.
+  const hoursUntilStart = (new Date(booking.start_at).getTime() - Date.now()) / 3_600_000;
+  const canReschedule = canCancel && hoursUntilStart >= FREE_CANCELLATION_HOURS;
 
   // Join window: 15 minutes before start until the lesson's end. Outside it
   // the link is hidden to avoid people joining an empty room days ahead.
@@ -101,6 +108,14 @@ export function BookingCard({
       {(canRetryPayment || canCancel) && (
         <div className="flex flex-wrap items-center gap-2">
           {canRetryPayment && <RetryPaymentButton bookingId={booking.id} />}
+          {canReschedule && (
+            <Link
+              href={`/${viewerRole}/bookings/${booking.id}/reschedule`}
+              className="border-hairline-strong hover:border-royal inline-flex min-h-11 items-center rounded-full border px-4 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:ring-[color:var(--ring)] focus-visible:outline-none"
+            >
+              Move lesson
+            </Link>
+          )}
           {canCancel && <CancelBookingButton bookingId={booking.id} />}
         </div>
       )}

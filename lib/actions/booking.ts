@@ -13,14 +13,20 @@ import {
   createBookingSchema,
   retryBookingPaymentSchema,
   cancelBookingSchema,
+  rescheduleBookingSchema,
 } from "@/lib/validations/booking";
 import { NotificationService } from "@/lib/notifications/service";
 import { MeetingService } from "@/lib/meet/service";
 import { ensureConversationForBooking } from "@/lib/messaging/service";
 import { logger } from "@/lib/observability/logger";
 import { platformFeeCents, resolvePlatformFeeBps } from "@/lib/pricing/commission";
-import { resolveCancellation, isCancellable } from "@/lib/booking/cancellation-policy";
+import {
+  resolveCancellation,
+  isCancellable,
+  FREE_CANCELLATION_HOURS,
+} from "@/lib/booking/cancellation-policy";
 import { refundBookingPayment } from "@/lib/stripe/refunds";
+import { consumeRateLimit, rateLimitMessage } from "@/lib/rate-limit/limiter";
 import type { Database } from "@/types/database";
 
 export type BookingActionState = {
@@ -31,6 +37,15 @@ export type BookingActionState = {
 const log = logger.child({ component: "booking-action" });
 
 const EXCLUSION_VIOLATION = "23P01";
+
+/**
+ * Minimum notice, in hours, to MOVE a lesson rather than cancel it.
+ *
+ * Deliberately equal to the free-cancellation window. If it were shorter,
+ * moving a lesson to a distant date and cancelling it there would be a
+ * free-refund loophole that walks straight around the cancellation policy.
+ */
+const RESCHEDULE_MIN_NOTICE_HOURS = FREE_CANCELLATION_HOURS;
 
 /**
  * Creates the Stripe Checkout Session for a booking and records the
@@ -174,6 +189,9 @@ export async function createBooking(
     return { error: auth.error };
   }
   const user = auth.user;
+
+  const createLimit = await consumeRateLimit("createBooking", user.id);
+  if (!createLimit.allowed) return { error: rateLimitMessage(createLimit) };
 
   // Every lesson is paid, so an unconfigured Stripe makes booking
   // impossible. Refuse up front rather than creating a booking row and
@@ -462,6 +480,9 @@ export async function cancelBooking(
   }
   const user = auth.user;
 
+  const cancelLimit = await consumeRateLimit("cancelBooking", user.id);
+  if (!cancelLimit.allowed) return { error: rateLimitMessage(cancelLimit) };
+
   // Migration 0030 stops a participant cancelling a PAID lesson with a direct
   // write, so the update below goes through the service role — which means the
   // ownership check RLS used to perform is now this function's job. Without
@@ -633,4 +654,142 @@ function cancellationMessage(
     return "Lesson cancelled. A refund is due on this lesson and our team has been notified — we'll be in touch.";
   }
   return "Lesson cancelled.";
+}
+
+/**
+ * Moves a booking to a new time.
+ *
+ * The split between what is checked here and what is checked in the database
+ * is deliberate and is documented at length in migration 0034. In short:
+ *
+ *   HERE (product policy)   the caller is a participant, there is enough
+ *                           notice, and the new time is genuinely one of the
+ *                           tutor's open slots — a rule that lives in
+ *                           lib/utils/availability-slots.ts and would be a
+ *                           second, divergent implementation if rewritten in
+ *                           SQL.
+ *   THERE (integrity)       participant, status, direction of time, derived
+ *                           duration, reschedule count, and — the one that
+ *                           must never be reimplemented in application code —
+ *                           the GiST exclusion constraint that makes
+ *                           double-booking impossible even under a race.
+ *
+ * No money moves. A reschedule is not a cancellation, so the payment, the
+ * platform fee and the tutor's payout all stay exactly as they were.
+ */
+export async function rescheduleBooking(
+  _prevState: BookingActionState,
+  formData: FormData,
+): Promise<BookingActionState> {
+  const parsed = rescheduleBookingSchema.safeParse({
+    bookingId: formData.get("bookingId"),
+    startAt: formData.get("startAt"),
+    reason: formData.get("reason"),
+  });
+
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  }
+
+  const supabase = await createClient();
+  const auth = await activeUserOrError(supabase);
+  if ("error" in auth) return { error: auth.error };
+  const user = auth.user;
+
+  const limit = await consumeRateLimit("rescheduleBooking", user.id);
+  if (!limit.allowed) return { error: rateLimitMessage(limit) };
+
+  const { data: booking } = await supabase
+    .from("bookings")
+    .select("id, student_id, tutor_id, status, start_at, lesson_duration_minutes")
+    .eq("id", parsed.data.bookingId)
+    .maybeSingle();
+
+  if (!booking || (booking.student_id !== user.id && booking.tutor_id !== user.id)) {
+    return { error: "Booking not found" };
+  }
+
+  if (!isCancellable(booking.status)) {
+    return { error: "Only an upcoming lesson can be moved." };
+  }
+
+  const newStart = new Date(parsed.data.startAt);
+  if (Number.isNaN(newStart.getTime())) return { error: "Pick a valid time" };
+
+  // A minimum notice on the OLD time as well as the new one: moving a lesson
+  // ten minutes before it starts is a cancellation wearing a different hat,
+  // and it would dodge the cancellation policy entirely.
+  const hoursUntilOriginal = (new Date(booking.start_at).getTime() - Date.now()) / 3_600_000;
+  if (hoursUntilOriginal < RESCHEDULE_MIN_NOTICE_HOURS) {
+    return {
+      error: `Lessons can't be moved within ${RESCHEDULE_MIN_NOTICE_HOURS} hours of the start time. Cancel it instead if you can't make it.`,
+    };
+  }
+
+  if (newStart.getTime() <= Date.now()) {
+    return { error: "Pick a time in the future" };
+  }
+
+  // The new time must be a slot this tutor actually offers. Computed from the
+  // tutor's own rules in the tutor's own zone — the same call the booking page
+  // makes, so the student can only pick what they were shown.
+  const { data: tutorAccount } = await supabase
+    .from("profiles")
+    .select("timezone")
+    .eq("id", booking.tutor_id)
+    .maybeSingle();
+
+  const slots = await getTutorAvailableSlots({
+    tutorId: booking.tutor_id,
+    timeZone: tutorAccount?.timezone ?? "UTC",
+    durationMinutes: booking.lesson_duration_minutes,
+  });
+
+  if (!slots.some((slot) => slot.startAt.getTime() === newStart.getTime())) {
+    return { error: "That time isn't one of this tutor's open slots. Please pick another." };
+  }
+
+  // reschedule_booking is SECURITY DEFINER and re-checks everything above that
+  // is an integrity concern. Its refusals come back as Postgres errors, which
+  // are translated rather than shown.
+  const { data: moved, error } = await createAdminClient().rpc("reschedule_booking", {
+    p_booking_id: booking.id,
+    p_new_start_at: newStart.toISOString(),
+    p_reason: parsed.data.reason,
+  });
+
+  if (error) {
+    if (error.code === EXCLUSION_VIOLATION) {
+      return { error: "That time was just taken — pick another slot." };
+    }
+    if (/maximum number of times/.test(error.message)) {
+      return {
+        error: "This lesson has already been moved as many times as we allow. Cancel and rebook.",
+      };
+    }
+    log.error("reschedule failed", error, { bookingId: booking.id });
+    return { error: "We couldn't move that lesson. Please try again." };
+  }
+
+  const updated = moved as unknown as { id: string; start_at: string; end_at: string } | null;
+
+  // Move the calendar event and the Meet room to match. Best-effort: the
+  // booking has already moved and must stay moved even if the provider is
+  // unreachable — the retry sweep picks up meeting_status = 'pending'.
+  if (updated) {
+    await MeetingService.rescheduleMeeting(booking.id, updated.start_at, updated.end_at);
+  }
+
+  const other = booking.student_id === user.id ? booking.tutor_id : booking.student_id;
+  await NotificationService.emit({
+    userId: other,
+    type: "booking_rescheduled",
+    title: "A lesson was moved",
+    body: parsed.data.reason ?? "Check your lessons for the new time.",
+    data: { href: other === booking.tutor_id ? "/tutor/bookings" : "/student/bookings" },
+  });
+
+  revalidatePath("/student/bookings");
+  revalidatePath("/tutor/bookings");
+  return { message: "Lesson moved. We've let the other person know." };
 }

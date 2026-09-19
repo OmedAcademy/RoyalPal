@@ -24,3 +24,9 @@ export const cancelBookingSchema = z.object({
   // null — see optionalText for the bug this fixes.
   reason: optionalText(500),
 });
+
+export const rescheduleBookingSchema = z.object({
+  bookingId: z.string().uuid(),
+  startAt: z.string().refine((v) => !Number.isNaN(Date.parse(v)), "Invalid start time"),
+  reason: optionalText(500),
+});

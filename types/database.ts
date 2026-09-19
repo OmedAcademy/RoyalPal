@@ -631,6 +631,22 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["booking_reschedules"]["Insert"]>;
         Relationships: [];
       };
+      rate_limits: {
+        /** Migration 0038. Service-role only: RLS is enabled with zero
+         * policies, so every authenticated and anonymous access is denied. */
+        Row: {
+          key: string;
+          window_started_at: string;
+          count: number;
+        };
+        Insert: {
+          key: string;
+          window_started_at: string;
+          count?: number;
+        };
+        Update: Partial<Database["public"]["Tables"]["rate_limits"]["Insert"]>;
+        Relationships: [];
+      };
       account_deletion_requests: {
         Row: {
           id: string;
