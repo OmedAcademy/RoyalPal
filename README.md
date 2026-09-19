@@ -136,12 +136,31 @@ verification query and the rollback.
 
 ```bash
 npm run typecheck && npm run lint && npm test && npm run build
+npm run test:e2e                      # browser smoke tests (needs a build first)
 cd mobile && npm run typecheck && npx expo export --platform ios
 ```
 
-The database tests run every migration against a real Postgres (PGlite) and
-exercise RLS and triggers as each actor — anonymous, student, tutor, admin,
-service role. They are where the security posture is actually pinned.
+Three layers, each catching what the others cannot:
+
+| Layer           | Where              | What it pins                                                                                                                                                                                             |
+| --------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unit and domain | `lib/**/*.test.ts` | Pricing, the cancellation policy, timezone arithmetic, validation, the webhook handlers                                                                                                                  |
+| Database        | `tests/db/`        | Every migration against a real Postgres (PGlite), exercising RLS and triggers as each actor — anonymous, student, tutor, admin, service role. **This is where the security posture is actually pinned.** |
+| Browser         | `e2e/`             | That the public pages render at all, that the policies are reachable, that the layout survives a phone viewport                                                                                          |
+
+The browser suite runs against `next start` with **placeholder** Supabase
+credentials and no database, so it covers exactly the pages that need neither.
+That is the point rather than a limitation: it runs on every push with nothing
+to seed and nothing left behind, and it catches the one class of failure the
+other two layers cannot — a page that compiles and throws at render.
+
+> `npm run test:e2e` reuses an already-running server on port 3100 if it finds
+> one. After a rebuild, stop it first; a server holding the previous `.next`
+> serves 400s for the new asset hashes and every test fails for the wrong
+> reason.
+
+The suite runs both a desktop and a phone viewport. Authenticated journeys are
+covered at the database layer rather than duplicated here.
 
 ### Stripe: shared account with Lingora
 
@@ -245,15 +264,24 @@ update public.profiles set role = 'admin' where id = '<auth-user-id>';
 
 ## Quality gates
 
-All five must pass before any change lands:
+All of these must pass before any change lands — CI runs them in three jobs
+(`verify`, `e2e`, `mobile`):
 
 ```bash
 npm run format
 npm run typecheck
 npm run lint
-npm run test
+npm run test                 # under TZ=UTC and TZ=America/New_York in CI
 npm run build
+npm run test:e2e             # after the build
+
+npm --prefix mobile run typecheck
+cd mobile && npx expo export --platform ios && npx expo export --platform android
 ```
+
+The mobile job exists because nothing else in the workflow looks inside
+`mobile/`: without it the Expo app can break on a renamed API field while CI
+stays green.
 
 ---
 

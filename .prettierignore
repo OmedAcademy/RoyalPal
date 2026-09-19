@@ -10,3 +10,8 @@ package-lock.json
 supabase/.temp
 mobile/node_modules
 mobile/.expo
+
+# playwright artifacts
+test-results/
+playwright-report/
+blob-report/
