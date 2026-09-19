@@ -98,7 +98,13 @@ export function Body({
 }) {
   const palette = usePalette();
   return (
-    <Text style={{ fontSize: size, lineHeight: size * 1.45, color: muted ? palette.muted : palette.foreground }}>
+    <Text
+      style={{
+        fontSize: size,
+        lineHeight: size * 1.45,
+        color: muted ? palette.muted : palette.foreground,
+      }}
+    >
       {children}
     </Text>
   );
@@ -165,7 +171,12 @@ export function Button({
         borderColor: palette.hairlineStrong,
       })}
     >
-      {busy && <ActivityIndicator size="small" color={isPrimary || isDanger ? "#fff" : palette.foreground} />}
+      {busy && (
+        <ActivityIndicator
+          size="small"
+          color={isPrimary || isDanger ? "#fff" : palette.foreground}
+        />
+      )}
       <Text
         style={{
           fontSize: 15,
@@ -179,44 +190,43 @@ export function Button({
   );
 }
 
-export const Field = forwardRef<TextInput, TextInputProps & { label: string; hint?: string; error?: string }>(
-  function Field({ label, hint, error, ...props }, ref) {
-    const palette = usePalette();
-    return (
-      <View style={{ gap: spacing.xs }}>
-        <Text style={{ fontSize: 14, fontWeight: "600", color: palette.foreground }}>{label}</Text>
-        <TextInput
-          ref={ref}
-          accessibilityLabel={label}
-          placeholderTextColor={palette.muted}
-          {...props}
-          style={[
-            {
-              minHeight: MIN_TOUCH_TARGET,
-              borderWidth: StyleSheet.hairlineWidth * 2,
-              borderColor: error ? palette.danger : palette.hairlineStrong,
-              borderRadius: radius.md,
-              paddingHorizontal: spacing.md,
-              paddingVertical: spacing.md,
-              fontSize: 16,
-              color: palette.foreground,
-              backgroundColor: palette.surface,
-            },
-            props.multiline ? { minHeight: 96, textAlignVertical: "top" } : null,
-          ]}
-        />
-        {hint && !error ? (
-          <Text style={{ fontSize: 12, color: palette.muted }}>{hint}</Text>
-        ) : null}
-        {error ? (
-          <Text accessibilityLiveRegion="polite" style={{ fontSize: 12, color: palette.danger }}>
-            {error}
-          </Text>
-        ) : null}
-      </View>
-    );
-  },
-);
+export const Field = forwardRef<
+  TextInput,
+  TextInputProps & { label: string; hint?: string; error?: string }
+>(function Field({ label, hint, error, ...props }, ref) {
+  const palette = usePalette();
+  return (
+    <View style={{ gap: spacing.xs }}>
+      <Text style={{ fontSize: 14, fontWeight: "600", color: palette.foreground }}>{label}</Text>
+      <TextInput
+        ref={ref}
+        accessibilityLabel={label}
+        placeholderTextColor={palette.muted}
+        {...props}
+        style={[
+          {
+            minHeight: MIN_TOUCH_TARGET,
+            borderWidth: StyleSheet.hairlineWidth * 2,
+            borderColor: error ? palette.danger : palette.hairlineStrong,
+            borderRadius: radius.md,
+            paddingHorizontal: spacing.md,
+            paddingVertical: spacing.md,
+            fontSize: 16,
+            color: palette.foreground,
+            backgroundColor: palette.surface,
+          },
+          props.multiline ? { minHeight: 96, textAlignVertical: "top" } : null,
+        ]}
+      />
+      {hint && !error ? <Text style={{ fontSize: 12, color: palette.muted }}>{hint}</Text> : null}
+      {error ? (
+        <Text accessibilityLiveRegion="polite" style={{ fontSize: 12, color: palette.danger }}>
+          {error}
+        </Text>
+      ) : null}
+    </View>
+  );
+});
 
 /** The four states every screen owes the person looking at it. */
 export function Loading({ label = "Loading…" }: { label?: string }) {
@@ -229,13 +239,7 @@ export function Loading({ label = "Loading…" }: { label?: string }) {
   );
 }
 
-export function ErrorState({
-  message,
-  onRetry,
-}: {
-  message: string;
-  onRetry?: () => void;
-}) {
+export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
   const palette = usePalette();
   return (
     <Card>
@@ -243,7 +247,11 @@ export function ErrorState({
         Something went wrong
       </Text>
       <Body muted>{message}</Body>
-      {onRetry ? <Button variant="secondary" onPress={onRetry}>Try again</Button> : null}
+      {onRetry ? (
+        <Button variant="secondary" onPress={onRetry}>
+          Try again
+        </Button>
+      ) : null}
     </Card>
   );
 }
@@ -266,7 +274,13 @@ export function EmptyState({
   );
 }
 
-export function Badge({ label, tone = "neutral" }: { label: string; tone?: "neutral" | "success" | "warning" | "danger" }) {
+export function Badge({
+  label,
+  tone = "neutral",
+}: {
+  label: string;
+  tone?: "neutral" | "success" | "warning" | "danger";
+}) {
   const palette = usePalette();
   const background =
     tone === "success"
@@ -286,7 +300,15 @@ export function Badge({ label, tone = "neutral" }: { label: string; tone?: "neut
           : palette.mutedStrong;
 
   return (
-    <View style={{ alignSelf: "flex-start", backgroundColor: background, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 3 }}>
+    <View
+      style={{
+        alignSelf: "flex-start",
+        backgroundColor: background,
+        borderRadius: radius.pill,
+        paddingHorizontal: 10,
+        paddingVertical: 3,
+      }}
+    >
       <Text style={{ fontSize: 12, fontWeight: "600", color }}>{label}</Text>
     </View>
   );

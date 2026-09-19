@@ -2,7 +2,16 @@ import { View, Text } from "react-native";
 import { router } from "expo-router";
 import { useAuth } from "@/lib/auth";
 import { useApi } from "@/lib/useApi";
-import { Screen, Heading, Body, Card, Button, Loading, ErrorState, EmptyState } from "@/components/ui";
+import {
+  Screen,
+  Heading,
+  Body,
+  Card,
+  Button,
+  Loading,
+  ErrorState,
+  EmptyState,
+} from "@/components/ui";
 import { BookingCard } from "@/components/BookingCard";
 import { spacing } from "@/lib/theme";
 import type { Booking } from "@/lib/api";

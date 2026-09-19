@@ -157,7 +157,11 @@ export default function ConversationScreen() {
         {send.error ? (
           <Text
             accessibilityRole="alert"
-            style={{ color: palette.danger, paddingHorizontal: spacing.lg, paddingBottom: spacing.sm }}
+            style={{
+              color: palette.danger,
+              paddingHorizontal: spacing.lg,
+              paddingBottom: spacing.sm,
+            }}
           >
             {send.error}
           </Text>

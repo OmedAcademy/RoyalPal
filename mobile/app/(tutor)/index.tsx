@@ -1,7 +1,17 @@
 import { View, Text, Linking } from "react-native";
 import { useAuth } from "@/lib/auth";
 import { useApi } from "@/lib/useApi";
-import { Screen, Heading, Body, Card, Badge, Button, Loading, ErrorState, EmptyState } from "@/components/ui";
+import {
+  Screen,
+  Heading,
+  Body,
+  Card,
+  Badge,
+  Button,
+  Loading,
+  ErrorState,
+  EmptyState,
+} from "@/components/ui";
 import { BookingCard } from "@/components/BookingCard";
 import { spacing } from "@/lib/theme";
 import type { Booking } from "@/lib/api";
@@ -37,7 +47,9 @@ export default function TutorHomeScreen() {
       </View>
 
       <Card>
-        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+        <View
+          style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}
+        >
           <Text style={{ fontWeight: "600" }}>Verification</Text>
           <Badge
             label={

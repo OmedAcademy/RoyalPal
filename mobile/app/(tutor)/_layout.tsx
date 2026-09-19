@@ -20,7 +20,10 @@ export default function TutorTabsLayout() {
     >
       <Tabs.Screen
         name="index"
-        options={{ title: "Home", tabBarIcon: ({ color }) => <TabIcon name="home" color={color} /> }}
+        options={{
+          title: "Home",
+          tabBarIcon: ({ color }) => <TabIcon name="home" color={color} />,
+        }}
       />
       <Tabs.Screen
         name="calendar"

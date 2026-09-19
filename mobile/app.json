@@ -17,9 +17,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.royalpal.app",
       "buildNumber": "1",
-      "associatedDomains": [
-        "applinks:royalpal.app"
-      ],
+      "associatedDomains": ["applinks:royalpal.app"],
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -44,15 +42,10 @@
               "host": "royalpal.app"
             }
           ],
-          "category": [
-            "BROWSABLE",
-            "DEFAULT"
-          ]
+          "category": ["BROWSABLE", "DEFAULT"]
         }
       ],
-      "permissions": [
-        "NOTIFICATIONS"
-      ]
+      "permissions": ["NOTIFICATIONS"]
     },
     "web": {
       "favicon": "./assets/favicon.png",

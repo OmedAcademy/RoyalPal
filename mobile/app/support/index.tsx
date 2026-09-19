@@ -3,7 +3,19 @@ import { View, Text, Pressable } from "react-native";
 import { router, Stack } from "expo-router";
 import { api } from "@/lib/api";
 import { useApi, useMutation } from "@/lib/useApi";
-import { Screen, Heading, Body, Card, Field, Button, Badge, Loading, ErrorState, usePalette, Divider } from "@/components/ui";
+import {
+  Screen,
+  Heading,
+  Body,
+  Card,
+  Field,
+  Button,
+  Badge,
+  Loading,
+  ErrorState,
+  usePalette,
+  Divider,
+} from "@/components/ui";
 import { formatRelativeShort } from "@/lib/format";
 import { spacing, radius, MIN_TOUCH_TARGET } from "@/lib/theme";
 import type { Ticket } from "@/lib/api";
@@ -142,7 +154,13 @@ export default function SupportScreen() {
           })}
         </View>
 
-        <Field label="Title" value={subject} onChangeText={setSubject} maxLength={200} placeholder="A short summary" />
+        <Field
+          label="Title"
+          value={subject}
+          onChangeText={setSubject}
+          maxLength={200}
+          placeholder="A short summary"
+        />
         <Field
           label="What happened?"
           value={body}

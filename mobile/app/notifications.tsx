@@ -3,7 +3,17 @@ import { View, Text, Pressable } from "react-native";
 import { router, Stack } from "expo-router";
 import { api } from "@/lib/api";
 import { useApi, useMutation } from "@/lib/useApi";
-import { Screen, Heading, Body, Loading, ErrorState, EmptyState, Button, usePalette, Divider } from "@/components/ui";
+import {
+  Screen,
+  Heading,
+  Body,
+  Loading,
+  ErrorState,
+  EmptyState,
+  Button,
+  usePalette,
+  Divider,
+} from "@/components/ui";
 import { formatRelativeShort } from "@/lib/format";
 import { spacing } from "@/lib/theme";
 import type { NotificationItem } from "@/lib/api";
@@ -77,10 +87,16 @@ export default function NotificationsScreen() {
               >
                 <Text style={{ fontSize: 18 }}>{item.icon}</Text>
                 <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={{ fontWeight: item.read ? "500" : "700", color: palette.foreground }}>
+                  <Text
+                    style={{ fontWeight: item.read ? "500" : "700", color: palette.foreground }}
+                  >
                     {item.title}
                   </Text>
-                  {item.body ? <Body muted size={14}>{item.body}</Body> : null}
+                  {item.body ? (
+                    <Body muted size={14}>
+                      {item.body}
+                    </Body>
+                  ) : null}
                   <Text style={{ color: palette.muted, fontSize: 12, marginTop: 2 }}>
                     {formatRelativeShort(item.createdAt)}
                   </Text>

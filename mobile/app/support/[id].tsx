@@ -3,7 +3,18 @@ import { View, Text } from "react-native";
 import { useLocalSearchParams, Stack } from "expo-router";
 import { api } from "@/lib/api";
 import { useApi, useMutation } from "@/lib/useApi";
-import { Screen, Heading, Body, Card, Field, Button, Badge, Loading, ErrorState, usePalette } from "@/components/ui";
+import {
+  Screen,
+  Heading,
+  Body,
+  Card,
+  Field,
+  Button,
+  Badge,
+  Loading,
+  ErrorState,
+  usePalette,
+} from "@/components/ui";
 import { formatRelativeShort } from "@/lib/format";
 import { spacing } from "@/lib/theme";
 
@@ -33,7 +44,10 @@ export default function TicketScreen() {
   if (state.error || !state.data) {
     return (
       <Screen>
-        <ErrorState message={state.error ?? "That request isn't available."} onRetry={state.reload} />
+        <ErrorState
+          message={state.error ?? "That request isn't available."}
+          onRetry={state.reload}
+        />
       </Screen>
     );
   }
@@ -52,7 +66,9 @@ export default function TicketScreen() {
       {messages.map((message) => (
         <Card key={message.id}>
           <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-            <Text style={{ fontWeight: "600", color: palette.foreground }}>{message.senderName}</Text>
+            <Text style={{ fontWeight: "600", color: palette.foreground }}>
+              {message.senderName}
+            </Text>
             <Text style={{ color: palette.muted, fontSize: 12 }}>
               {formatRelativeShort(message.createdAt)}
             </Text>

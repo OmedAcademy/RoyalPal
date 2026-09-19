@@ -74,7 +74,9 @@ export function TutorCard({
                 justifyContent: "center",
               }}
             >
-              <Text style={{ fontSize: 22, color: tutor.favorited ? palette.royal : palette.muted }}>
+              <Text
+                style={{ fontSize: 22, color: tutor.favorited ? palette.royal : palette.muted }}
+              >
                 {tutor.favorited ? "♥" : "♡"}
               </Text>
             </Pressable>

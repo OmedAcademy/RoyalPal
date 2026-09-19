@@ -4,7 +4,17 @@ import { useLocalSearchParams, router } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import { api } from "@/lib/api";
 import { useApi, useMutation } from "@/lib/useApi";
-import { Screen, Heading, Body, Card, Button, Loading, ErrorState, EmptyState, usePalette } from "@/components/ui";
+import {
+  Screen,
+  Heading,
+  Body,
+  Card,
+  Button,
+  Loading,
+  ErrorState,
+  EmptyState,
+  usePalette,
+} from "@/components/ui";
 import { formatMoney } from "@/lib/format";
 import { spacing, radius, MIN_TOUCH_TARGET } from "@/lib/theme";
 import type { AvailabilityDay, TutorSummary } from "@/lib/api";
@@ -44,7 +54,10 @@ export default function BookLessonScreen() {
   if (tutorState.error || !tutorState.data) {
     return (
       <Screen>
-        <ErrorState message={tutorState.error ?? "Couldn't load that tutor."} onRetry={tutorState.reload} />
+        <ErrorState
+          message={tutorState.error ?? "Couldn't load that tutor."}
+          onRetry={tutorState.reload}
+        />
       </Screen>
     );
   }
@@ -228,9 +241,7 @@ export default function BookLessonScreen() {
       <Button onPress={onBook} busy={book.busy} disabled={!slot || !chosenSubject}>
         {book.busy ? "Reserving…" : "Continue to payment"}
       </Button>
-      <Body muted>
-        You&apos;ll finish payment in your browser. The slot is held while you do.
-      </Body>
+      <Body muted>You&apos;ll finish payment in your browser. The slot is held while you do.</Body>
     </Screen>
   );
 }

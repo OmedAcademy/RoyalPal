@@ -3,7 +3,17 @@ import { View, Text, Linking, Alert } from "react-native";
 import { useLocalSearchParams, router, Stack } from "expo-router";
 import { api } from "@/lib/api";
 import { useApi, useMutation } from "@/lib/useApi";
-import { Screen, Heading, Body, Card, Button, Badge, Loading, ErrorState, usePalette } from "@/components/ui";
+import {
+  Screen,
+  Heading,
+  Body,
+  Card,
+  Button,
+  Badge,
+  Loading,
+  ErrorState,
+  usePalette,
+} from "@/components/ui";
 import { formatDateTimeIn, formatMoney, timeZoneLabel, BOOKING_STATUS_LABELS } from "@/lib/format";
 import { spacing } from "@/lib/theme";
 import type { Booking } from "@/lib/api";

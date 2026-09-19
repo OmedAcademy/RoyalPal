@@ -52,11 +52,7 @@ async function ensureAndroidChannel(): Promise<void> {
 function projectId(): string | undefined {
   // The id EAS assigns. getExpoPushTokenAsync cannot mint a token without it,
   // so an unconfigured build simply has no push rather than a crash.
-  return (
-    Constants.expoConfig?.extra?.eas?.projectId ??
-    Constants.easConfig?.projectId ??
-    undefined
-  );
+  return Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId ?? undefined;
 }
 
 export type PushRegistration = { token: string; platform: "ios" | "android" | "web" };

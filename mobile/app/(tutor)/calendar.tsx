@@ -1,7 +1,17 @@
 import { View, Text, Linking } from "react-native";
 import { useAuth } from "@/lib/auth";
 import { useApi } from "@/lib/useApi";
-import { Screen, Heading, Body, Card, Button, Loading, ErrorState, EmptyState, usePalette } from "@/components/ui";
+import {
+  Screen,
+  Heading,
+  Body,
+  Card,
+  Button,
+  Loading,
+  ErrorState,
+  EmptyState,
+  usePalette,
+} from "@/components/ui";
 import { formatDateIn, formatTimeIn, timeZoneLabel } from "@/lib/format";
 import { spacing } from "@/lib/theme";
 import type { Booking } from "@/lib/api";
@@ -12,7 +22,12 @@ type BookingsResponse = { bookings: Booking[]; timezone: string };
 type AvailabilityResponse = {
   timezone: string;
   rules: { day_of_week: number; start_time: string; end_time: string }[];
-  exceptions: { date: string; start_time: string | null; end_time: string | null; is_available: boolean }[];
+  exceptions: {
+    date: string;
+    start_time: string | null;
+    end_time: string | null;
+    is_available: boolean;
+  }[];
 };
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -55,7 +70,10 @@ export default function TutorCalendarScreen() {
           onRetry={bookings.retryable ? bookings.reload : undefined}
         />
       ) : byDay.size === 0 ? (
-        <EmptyState title="Nothing scheduled" message="Confirmed lessons will appear here by day." />
+        <EmptyState
+          title="Nothing scheduled"
+          message="Confirmed lessons will appear here by day."
+        />
       ) : (
         [...byDay.entries()].map(([day, dayBookings]) => (
           <Card key={day}>
@@ -68,7 +86,10 @@ export default function TutorCalendarScreen() {
                 <Text style={{ color: palette.foreground }}>
                   {formatTimeIn(booking.start_at, timezone)}
                 </Text>
-                <Text numberOfLines={1} style={{ color: palette.muted, flex: 1, textAlign: "right" }}>
+                <Text
+                  numberOfLines={1}
+                  style={{ color: palette.muted, flex: 1, textAlign: "right" }}
+                >
                   {booking.student_name}
                 </Text>
               </View>

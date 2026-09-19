@@ -25,7 +25,12 @@ export type TabIconName = keyof typeof GLYPHS;
 // only a hex string.
 export function TabIcon({ name, color }: { name: TabIconName; color: ColorValue }) {
   return (
-    <Text allowFontScaling={false} accessibilityElementsHidden importantForAccessibility="no" style={{ fontSize: 20, color, lineHeight: 24 }}>
+    <Text
+      allowFontScaling={false}
+      accessibilityElementsHidden
+      importantForAccessibility="no"
+      style={{ fontSize: 20, color, lineHeight: 24 }}
+    >
       {GLYPHS[name]}
     </Text>
   );

@@ -13,6 +13,8 @@
  * That turns "a payment failed somewhere" into a single greppable trace.
  */
 
+import { sendAlert } from "@/lib/observability/alerts";
+
 type Level = "debug" | "info" | "warn" | "error";
 export type LogFields = Record<string, unknown>;
 
@@ -45,6 +47,14 @@ function write(level: Level, base: LogFields, message: string, fields?: LogField
   if (level === "error") console.error(line);
   else if (level === "warn") console.warn(line);
   else console.log(line);
+
+  // Errors are also pushed to whoever is on call. Fire-and-forget, and
+  // redacted — see lib/observability/alerts.ts for what is deliberately not
+  // sent. Dormant unless ALERT_WEBHOOK_URL is set, so nothing changes for a
+  // deployment that has not configured it.
+  if (level === "error") {
+    void sendAlert(message, { ...base, ...fields });
+  }
 }
 
 export function createLogger(base: LogFields = {}): Logger {

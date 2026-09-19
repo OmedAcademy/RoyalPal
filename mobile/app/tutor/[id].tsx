@@ -3,7 +3,17 @@ import { View, Text, Linking } from "react-native";
 import { useLocalSearchParams, router, Stack } from "expo-router";
 import { api } from "@/lib/api";
 import { useApi, useMutation } from "@/lib/useApi";
-import { Screen, Heading, Body, Card, Button, Badge, Loading, ErrorState, usePalette } from "@/components/ui";
+import {
+  Screen,
+  Heading,
+  Body,
+  Card,
+  Button,
+  Badge,
+  Loading,
+  ErrorState,
+  usePalette,
+} from "@/components/ui";
 import { formatMoney } from "@/lib/format";
 import { spacing } from "@/lib/theme";
 import type { TutorSummary } from "@/lib/api";
