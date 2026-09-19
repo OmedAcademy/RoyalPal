@@ -1,5 +1,5 @@
 /**
- * Hand-authored to match supabase/migrations/0001-0019 exactly.
+ * Hand-authored to match supabase/migrations/0001-0037 exactly.
  * Once a real Supabase project exists, regenerate and diff against this file with:
  *   npx supabase gen types typescript --project-id <project-id> --schema public
  *
@@ -23,6 +23,12 @@ export type PaymentStatus = "requires_payment" | "succeeded" | "failed" | "refun
  * Connect onboarding. Distinct from PaymentStatus, which is the student's
  * charge. */
 export type TransferStatus = "paid" | "reversed";
+export type SupportCategory =
+  "account" | "booking" | "payment" | "technical" | "report_user" | "safeguarding" | "other";
+export type SupportStatus = "open" | "in_progress" | "waiting_on_user" | "resolved" | "closed";
+export type PushPlatform = "ios" | "android" | "web";
+export type NotificationChannel = "email" | "push";
+export type ConversationStatus = "open" | "closed";
 
 export interface Database {
   public: {
@@ -39,6 +45,14 @@ export interface Database {
           status: UserStatus;
           created_at: string;
           updated_at: string;
+          // Migration 0036. Write-once age gate; see profiles_date_of_birth lock.
+          date_of_birth: string | null;
+          age_confirmed_at: string | null;
+          // Migration 0039. Consent evidence: who, when, and which version.
+          terms_accepted_at: string | null;
+          terms_version: string | null;
+          deletion_requested_at: string | null;
+          anonymized_at: string | null;
         };
         Insert: {
           id: string;
@@ -51,6 +65,12 @@ export interface Database {
           status?: UserStatus;
           created_at?: string;
           updated_at?: string;
+          date_of_birth?: string | null;
+          age_confirmed_at?: string | null;
+          terms_accepted_at?: string | null;
+          terms_version?: string | null;
+          deletion_requested_at?: string | null;
+          anonymized_at?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["profiles"]["Insert"]>;
         Relationships: [];
@@ -114,6 +134,12 @@ export interface Database {
           platform_fee_bps: number | null;
           created_at: string;
           updated_at: string;
+          // Migration 0036. Why an application was rejected, so the tutor is
+          // told something actionable instead of "update your profile".
+          rejection_reason: string | null;
+          rejection_notes: string | null;
+          verification_decided_at: string | null;
+          verification_decided_by: string | null;
         };
         Insert: {
           id: string;
@@ -142,6 +168,10 @@ export interface Database {
           platform_fee_bps?: number | null;
           created_at?: string;
           updated_at?: string;
+          rejection_reason?: string | null;
+          rejection_notes?: string | null;
+          verification_decided_at?: string | null;
+          verification_decided_by?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["tutor_profiles"]["Insert"]>;
         Relationships: [];
@@ -240,6 +270,13 @@ export interface Database {
           cancellation_reason: string | null;
           created_at: string;
           updated_at: string;
+          // Migration 0037. refund_owed_cents is what OUR policy decided;
+          // whether it was actually refunded lives in payments.status, which
+          // only Stripe's charge.refunded event writes.
+          cancelled_at: string | null;
+          cancelled_by: string | null;
+          cancellation_policy: string | null;
+          refund_owed_cents: number | null;
         };
         Insert: {
           id?: string;
@@ -262,6 +299,10 @@ export interface Database {
           cancellation_reason?: string | null;
           created_at?: string;
           updated_at?: string;
+          cancelled_at?: string | null;
+          cancelled_by?: string | null;
+          cancellation_policy?: string | null;
+          refund_owed_cents?: number | null;
         };
         Update: Partial<Database["public"]["Tables"]["bookings"]["Insert"]>;
         Relationships: [];
@@ -285,6 +326,11 @@ export interface Database {
           transfer_status_reason: string | null;
           stripe_dispute_id: string | null;
           dispute_status: string | null;
+          // Migration 0037. An ATTEMPT, not an outcome — `status` is the only
+          // field that says Stripe confirmed the money moved back.
+          refund_requested_at: string | null;
+          refund_requested_by: string | null;
+          stripe_refund_id: string | null;
         };
         Insert: {
           id?: string;
@@ -301,6 +347,9 @@ export interface Database {
           transfer_status_reason?: string | null;
           stripe_dispute_id?: string | null;
           dispute_status?: string | null;
+          refund_requested_at?: string | null;
+          refund_requested_by?: string | null;
+          stripe_refund_id?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["payments"]["Insert"]>;
         Relationships: [];
@@ -314,6 +363,13 @@ export interface Database {
           rating: number;
           comment: string | null;
           created_at: string;
+          // Migration 0035. Hidden reviews keep their row but leave public
+          // view and stop counting toward the tutor's average.
+          hidden_at: string | null;
+          hidden_by: string | null;
+          hidden_reason: string | null;
+          tutor_reply: string | null;
+          tutor_replied_at: string | null;
         };
         Insert: {
           id?: string;
@@ -323,6 +379,11 @@ export interface Database {
           rating: number;
           comment?: string | null;
           created_at?: string;
+          hidden_at?: string | null;
+          hidden_by?: string | null;
+          hidden_reason?: string | null;
+          tutor_reply?: string | null;
+          tutor_replied_at?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["reviews"]["Insert"]>;
         Relationships: [];
@@ -405,6 +466,193 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["stripe_events"]["Insert"]>;
         Relationships: [];
       };
+      support_tickets: {
+        Row: {
+          id: string;
+          user_id: string;
+          category: SupportCategory;
+          subject: string;
+          status: SupportStatus;
+          assigned_admin_id: string | null;
+          last_message_at: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          category?: SupportCategory;
+          subject: string;
+          status?: SupportStatus;
+          assigned_admin_id?: string | null;
+          last_message_at?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["support_tickets"]["Insert"]>;
+        Relationships: [];
+      };
+      support_messages: {
+        Row: {
+          id: string;
+          ticket_id: string;
+          sender_id: string;
+          /** Recorded at write time, never derived from the sender's current
+           * role — a demoted admin must not retroactively unwrite their
+           * replies. */
+          from_admin: boolean;
+          body: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          ticket_id: string;
+          sender_id: string;
+          from_admin?: boolean;
+          body: string;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["support_messages"]["Insert"]>;
+        Relationships: [];
+      };
+      conversations: {
+        Row: {
+          id: string;
+          booking_id: string;
+          student_id: string;
+          tutor_id: string;
+          status: ConversationStatus;
+          closed_reason: string | null;
+          last_message_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          booking_id: string;
+          student_id: string;
+          tutor_id: string;
+          status?: ConversationStatus;
+          closed_reason?: string | null;
+          last_message_at?: string | null;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["conversations"]["Insert"]>;
+        Relationships: [];
+      };
+      messages: {
+        Row: {
+          id: string;
+          conversation_id: string;
+          sender_id: string;
+          body: string;
+          read_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          conversation_id: string;
+          sender_id: string;
+          body: string;
+          read_at?: string | null;
+          created_at?: string;
+        };
+        /** read_at is the ONLY field a client may change (migration 0032's
+         * protect_message_columns). */
+        Update: Partial<Database["public"]["Tables"]["messages"]["Insert"]>;
+        Relationships: [];
+      };
+      push_tokens: {
+        Row: {
+          id: string;
+          user_id: string;
+          token: string;
+          platform: PushPlatform;
+          device_name: string | null;
+          disabled_at: string | null;
+          last_seen_at: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          token: string;
+          platform: PushPlatform;
+          device_name?: string | null;
+          disabled_at?: string | null;
+          last_seen_at?: string;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["push_tokens"]["Insert"]>;
+        Relationships: [];
+      };
+      notification_preferences: {
+        /** Opt-OUT rows: a row exists only where something is switched off,
+         * so the absence of data means enabled. */
+        Row: {
+          user_id: string;
+          channel: NotificationChannel;
+          category: string;
+          enabled: boolean;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          channel: NotificationChannel;
+          category: string;
+          enabled?: boolean;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["notification_preferences"]["Insert"]>;
+        Relationships: [];
+      };
+      booking_reschedules: {
+        Row: {
+          id: string;
+          booking_id: string;
+          requested_by: string;
+          previous_start_at: string;
+          previous_end_at: string;
+          new_start_at: string;
+          new_end_at: string;
+          reason: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          booking_id: string;
+          requested_by: string;
+          previous_start_at: string;
+          previous_end_at: string;
+          new_start_at: string;
+          new_end_at: string;
+          reason?: string | null;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["booking_reschedules"]["Insert"]>;
+        Relationships: [];
+      };
+      account_deletion_requests: {
+        Row: {
+          id: string;
+          user_id: string;
+          reason: string | null;
+          scheduled_for: string;
+          cancelled_at: string | null;
+          completed_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          reason?: string | null;
+          scheduled_for: string;
+          cancelled_at?: string | null;
+          completed_at?: string | null;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["account_deletion_requests"]["Insert"]>;
+        Relationships: [];
+      };
     };
     Views: {
       review_authors: {
@@ -416,7 +664,26 @@ export interface Database {
         Relationships: [];
       };
     };
-    Functions: Record<string, never>;
+    Functions: {
+      /** Migration 0034. The single audited door through which a booking's
+       * start_at/end_at may change; see the migration for why it exists. */
+      reschedule_booking: {
+        Args: {
+          p_booking_id: string;
+          p_new_start_at: string;
+          p_reason?: string | null;
+          p_max_reschedules?: number;
+        };
+        Returns: Database["public"]["Tables"]["bookings"]["Row"];
+      };
+      /** Migration 0038. Atomic fixed-window counter; the check and the
+       * increment are one statement because read-then-write is a race two
+       * concurrent requests win together. */
+      consume_rate_limit: {
+        Args: { p_key: string; p_limit: number; p_window_seconds: number };
+        Returns: { allowed: boolean; remaining: number; reset_at: string }[];
+      };
+    };
     Enums: {
       user_role: UserRole;
       user_status: UserStatus;
@@ -424,6 +691,8 @@ export interface Database {
       booking_status: BookingStatus;
       payment_status: PaymentStatus;
       english_level: EnglishLevel;
+      support_category: SupportCategory;
+      support_status: SupportStatus;
     };
   };
 }
@@ -438,3 +707,13 @@ export type Booking = Database["public"]["Tables"]["bookings"]["Row"];
 export type Payment = Database["public"]["Tables"]["payments"]["Row"];
 export type Review = Database["public"]["Tables"]["reviews"]["Row"];
 export type StripeEvent = Database["public"]["Tables"]["stripe_events"]["Row"];
+export type SupportTicket = Database["public"]["Tables"]["support_tickets"]["Row"];
+export type SupportMessage = Database["public"]["Tables"]["support_messages"]["Row"];
+export type Conversation = Database["public"]["Tables"]["conversations"]["Row"];
+export type Message = Database["public"]["Tables"]["messages"]["Row"];
+export type PushToken = Database["public"]["Tables"]["push_tokens"]["Row"];
+export type NotificationPreference =
+  Database["public"]["Tables"]["notification_preferences"]["Row"];
+export type BookingReschedule = Database["public"]["Tables"]["booking_reschedules"]["Row"];
+export type AccountDeletionRequest =
+  Database["public"]["Tables"]["account_deletion_requests"]["Row"];

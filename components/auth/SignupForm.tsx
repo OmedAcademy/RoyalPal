@@ -4,6 +4,8 @@ import { useActionState } from "react";
 import { signup, type AuthActionState } from "@/lib/actions/auth";
 import { Button } from "@/components/ui/Button";
 import { fieldInputClass, fieldLabelClass } from "@/components/ui/field-styles";
+import { LEGAL_ROUTES } from "@/lib/constants/legal";
+import { MINIMUM_AGE_YEARS } from "@/lib/utils/age";
 
 const initialState: AuthActionState = {};
 
@@ -88,11 +90,68 @@ export function SignupForm() {
           name="password"
           type="password"
           required
-          minLength={8}
+          minLength={10}
           autoComplete="new-password"
-          placeholder="At least 8 characters"
+          placeholder="At least 10 characters"
+          aria-describedby="password-hint"
           className={fieldInputClass}
         />
+        <p id="password-hint" className="text-muted text-xs">
+          At least 10 characters. Avoid anything you use on another site.
+        </p>
+      </div>
+
+      {/* RoyalPal is 18+. The real enforcement is in handle_new_user (migration
+          0039), inside the auth.users insert — this field is the part a person
+          sees, not the part that decides. */}
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor="dateOfBirth" className={fieldLabelClass}>
+          Date of birth
+        </label>
+        <input
+          id="dateOfBirth"
+          name="dateOfBirth"
+          type="date"
+          required
+          autoComplete="bday"
+          max={new Date().toISOString().slice(0, 10)}
+          aria-describedby="dob-hint"
+          className={fieldInputClass}
+        />
+        <p id="dob-hint" className="text-muted text-xs">
+          RoyalPal is for people aged {MINIMUM_AGE_YEARS} and over.
+        </p>
+      </div>
+
+      <div className="flex items-start gap-2.5">
+        <input
+          id="acceptedTerms"
+          name="acceptedTerms"
+          type="checkbox"
+          required
+          className="border-hairline-strong text-royal mt-0.5 h-4 w-4 shrink-0 rounded focus:ring-[color:var(--ring)]"
+        />
+        <label htmlFor="acceptedTerms" className="text-muted text-sm leading-relaxed">
+          I&apos;m {MINIMUM_AGE_YEARS} or over and I agree to RoyalPal&apos;s{" "}
+          <a
+            href={LEGAL_ROUTES.terms}
+            target="_blank"
+            rel="noreferrer"
+            className="text-royal underline underline-offset-2"
+          >
+            Terms of Service
+          </a>{" "}
+          and{" "}
+          <a
+            href={LEGAL_ROUTES.privacy}
+            target="_blank"
+            rel="noreferrer"
+            className="text-royal underline underline-offset-2"
+          >
+            Privacy Policy
+          </a>
+          .
+        </label>
       </div>
 
       {state.error && (

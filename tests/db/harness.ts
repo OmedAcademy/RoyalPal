@@ -124,7 +124,14 @@ export async function createUser(
   await db.query("insert into auth.users (id, email, raw_user_meta_data) values ($1, $2, $3)", [
     id,
     `${id}@test.royalpal.local`,
-    JSON.stringify({ role: role === "admin" ? "tutor" : role, full_name: fullName }),
+    // date_of_birth is required by handle_new_user from migration 0039 — the
+    // age gate is enforced inside the auth.users insert, so a fixture without
+    // one fails the whole signup transaction exactly as a real one would.
+    JSON.stringify({
+      role: role === "admin" ? "tutor" : role,
+      full_name: fullName,
+      date_of_birth: "1990-01-01",
+    }),
   ]);
   if (role === "admin") {
     await db.query("update public.profiles set role = 'admin' where id = $1", [id]);

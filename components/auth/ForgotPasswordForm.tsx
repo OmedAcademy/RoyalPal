@@ -1,21 +1,32 @@
 "use client";
 
 import { useActionState } from "react";
-import { login, type AuthActionState } from "@/lib/actions/auth";
+import { requestPasswordReset, type AuthActionState } from "@/lib/actions/auth";
 import { Button } from "@/components/ui/Button";
 import { fieldInputClass, fieldLabelClass } from "@/components/ui/field-styles";
 
 const initialState: AuthActionState = {};
 
-export function LoginForm({ redirectTo }: { redirectTo?: string }) {
-  const [state, formAction, pending] = useActionState(login, initialState);
+export function ForgotPasswordForm() {
+  const [state, formAction, pending] = useActionState(requestPasswordReset, initialState);
+
+  // The action answers identically whether or not the address has an account,
+  // so the success state is terminal: re-rendering the form underneath it
+  // would invite the "try another address" probing the sameness is there to
+  // prevent.
+  if (state.message) {
+    return (
+      <div
+        role="status"
+        className="rounded-xl border border-green-600/25 bg-green-500/5 px-4 py-4 text-sm leading-relaxed text-green-700 dark:text-green-400"
+      >
+        {state.message}
+      </div>
+    );
+  }
 
   return (
     <form action={formAction} className="flex flex-col gap-4">
-      {/* Where the middleware wanted the user to end up. Validated server-side
-          by safeRedirectPath before it is ever used — a hidden field is
-          attacker-controlled like any other input. */}
-      {redirectTo && <input type="hidden" name="redirectTo" value={redirectTo} />}
       <div className="flex flex-col gap-1.5">
         <label htmlFor="email" className={fieldLabelClass}>
           Email
@@ -31,21 +42,6 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
         />
       </div>
 
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="password" className={fieldLabelClass}>
-          Password
-        </label>
-        <input
-          id="password"
-          name="password"
-          type="password"
-          required
-          autoComplete="current-password"
-          placeholder="••••••••"
-          className={fieldInputClass}
-        />
-      </div>
-
       {state.error && (
         <p
           role="alert"
@@ -56,7 +52,7 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
       )}
 
       <Button type="submit" disabled={pending} aria-busy={pending} className="mt-1 w-full">
-        {pending ? "Signing in…" : "Sign in"}
+        {pending ? "Sending…" : "Send reset link"}
       </Button>
     </form>
   );
