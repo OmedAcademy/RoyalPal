@@ -182,8 +182,8 @@ export function TutorProfileForm({
         defaultValue={tutorProfile?.availability_note}
         maxLength={500}
         rows={2}
-        placeholder="e.g. Weekday evenings and weekends (full scheduling arrives in a later milestone)"
-        hint="Placeholder for now — full calendar-based availability lands in a later milestone."
+        placeholder="e.g. Happy to be flexible for regular students"
+        hint="A free-text note shown on your profile. Your actual bookable hours are set on the Availability page — that's what students book against."
       />
 
       {state.error && (

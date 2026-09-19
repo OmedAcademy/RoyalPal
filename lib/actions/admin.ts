@@ -55,10 +55,36 @@ async function logAction(
   });
 }
 
-const verificationSchema = z.object({
-  tutorId: z.string().uuid(),
-  status: z.enum(["approved", "rejected", "pending"]),
-});
+const REJECTION_REASONS = [
+  "Profile is incomplete",
+  "Bio or headline needs more detail",
+  "Qualifications could not be verified",
+  "Photo does not meet our guidelines",
+  "Pricing looks incorrect",
+  "Something else",
+] as const;
+
+export const TUTOR_REJECTION_REASONS = REJECTION_REASONS;
+
+const verificationSchema = z
+  .object({
+    tutorId: z.string().uuid(),
+    status: z.enum(["approved", "rejected", "pending"]),
+    reason: z.string().trim().max(120).optional(),
+    notes: z.string().trim().max(2000).optional(),
+  })
+  .superRefine((data, ctx) => {
+    // A rejection with no reason is what produced the old "please review and
+    // update your profile" message, sent to someone with no way of knowing
+    // what was wrong. That is a support ticket by construction.
+    if (data.status === "rejected" && !data.reason) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["reason"],
+        message: "Choose a reason so the tutor knows what to change",
+      });
+    }
+  });
 
 export async function setTutorVerification(
   _prev: AdminActionState,
@@ -70,13 +96,25 @@ export async function setTutorVerification(
   const parsed = verificationSchema.safeParse({
     tutorId: formData.get("tutorId"),
     status: formData.get("status"),
+    reason: formData.get("reason") ?? undefined,
+    notes: formData.get("notes") ?? undefined,
   });
-  if (!parsed.success) return { error: "Invalid request" };
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid request" };
+  }
 
   const admin = createAdminClient();
   const { error } = await admin
     .from("tutor_profiles")
-    .update({ verification_status: parsed.data.status })
+    .update({
+      verification_status: parsed.data.status,
+      // Cleared on approval: a stale rejection reason sitting on an approved
+      // profile is worse than none, because it reads as current.
+      rejection_reason: parsed.data.status === "rejected" ? (parsed.data.reason ?? null) : null,
+      rejection_notes: parsed.data.status === "rejected" ? (parsed.data.notes ?? null) : null,
+      verification_decided_at: new Date().toISOString(),
+      verification_decided_by: auth.adminId,
+    })
     .eq("id", parsed.data.tutorId);
 
   if (error) return { error: error.message };
@@ -96,7 +134,11 @@ export async function setTutorVerification(
       userId: parsed.data.tutorId,
       type: "tutor_rejected",
       title: "Your tutor application needs changes",
-      body: "Please review and update your profile, then it can be re-reviewed.",
+      // The reason, not a generic instruction. The tutor's own dashboard shows
+      // the same string, so the notification and the profile agree.
+      body: parsed.data.notes
+        ? `${parsed.data.reason}: ${parsed.data.notes}`
+        : (parsed.data.reason ?? "Please review and update your profile."),
       data: { href: "/tutor/profile" },
     });
   }
@@ -213,4 +255,94 @@ export async function refundBooking(
 
   revalidatePath("/admin/payments");
   return { message: "Refund requested — it will show as refunded once Stripe confirms it." };
+}
+
+const hideSchema = z.object({
+  reviewId: z.string().uuid(),
+  reason: z.string().trim().min(1, "Give a reason").max(500),
+});
+
+/**
+ * Hides a review.
+ *
+ * Hiding, never deleting. The row, its text, its author and its timestamp all
+ * survive: a review that breaks the rules is also the evidence that it did,
+ * and a complaint about a review nobody can read afterwards cannot be
+ * reviewed. Migration 0035 enforces that hiding carries who and why, and its
+ * column lock refuses any edit to the rating or comment — moderation removes a
+ * review from view, it does not rewrite one.
+ */
+export async function hideReview(
+  _prev: AdminActionState,
+  formData: FormData,
+): Promise<AdminActionState> {
+  const auth = await authorizeAdmin();
+  if (!auth.ok) return { error: auth.error };
+
+  const parsed = hideSchema.safeParse({
+    reviewId: formData.get("reviewId"),
+    reason: formData.get("reason"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid request" };
+  }
+
+  const admin = createAdminClient();
+  const { data: review, error } = await admin
+    .from("reviews")
+    .update({
+      hidden_at: new Date().toISOString(),
+      hidden_by: auth.adminId,
+      hidden_reason: parsed.data.reason,
+    })
+    .eq("id", parsed.data.reviewId)
+    .select("tutor_id, student_id")
+    .maybeSingle();
+
+  if (error || !review) return { error: "Couldn't hide that review." };
+
+  await logAction(auth.adminId, "review_hidden", parsed.data.reviewId);
+
+  // The author is told, because being silently censored is worse than being
+  // told why. The tutor is not: the usual reason for hiding is that the
+  // exchange needs to stop.
+  await NotificationService.emit({
+    userId: review.student_id,
+    type: "review_hidden",
+    title: "One of your reviews was hidden",
+    body: parsed.data.reason,
+    data: { href: "/student/bookings" },
+  });
+
+  revalidatePath("/admin/reviews");
+  revalidatePath(`/student/tutors/${review.tutor_id}`);
+  return { message: "Review hidden." };
+}
+
+export async function unhideReview(
+  _prev: AdminActionState,
+  formData: FormData,
+): Promise<AdminActionState> {
+  const auth = await authorizeAdmin();
+  if (!auth.ok) return { error: auth.error };
+
+  const reviewId = formData.get("reviewId");
+  if (typeof reviewId !== "string") return { error: "Invalid request" };
+
+  const admin = createAdminClient();
+  // All three columns must clear together or 0035's CHECK refuses the row.
+  const { data: review, error } = await admin
+    .from("reviews")
+    .update({ hidden_at: null, hidden_by: null, hidden_reason: null })
+    .eq("id", reviewId)
+    .select("tutor_id")
+    .maybeSingle();
+
+  if (error || !review) return { error: "Couldn't restore that review." };
+
+  await logAction(auth.adminId, "review_restored", reviewId);
+
+  revalidatePath("/admin/reviews");
+  revalidatePath(`/student/tutors/${review.tutor_id}`);
+  return { message: "Review restored." };
 }

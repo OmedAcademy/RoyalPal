@@ -374,6 +374,9 @@ export type AdminReviewRow = {
   rating: number;
   comment: string | null;
   created_at: string;
+  hidden_at: string | null;
+  hidden_reason: string | null;
+  tutor_reply: string | null;
   student_name: string;
   tutor_name: string;
 };
@@ -385,13 +388,19 @@ export async function listReviews(): Promise<AdminReviewRow[]> {
     rating: number;
     comment: string | null;
     created_at: string;
+    hidden_at: string | null;
+    hidden_reason: string | null;
+    tutor_reply: string | null;
     student: { full_name: string } | null;
     tutor_profiles: { profiles: { full_name: string } | null } | null;
   };
+  // The service role sees hidden reviews too — that is the point of a
+  // moderation queue, and the only place they remain visible besides their
+  // own author.
   const { data } = await admin
     .from("reviews")
     .select(
-      "id, rating, comment, created_at, student:profiles!reviews_student_id_fkey(full_name), tutor_profiles!reviews_tutor_id_fkey(profiles!tutor_profiles_id_fkey(full_name))",
+      "id, rating, comment, created_at, hidden_at, hidden_reason, tutor_reply, student:profiles!reviews_student_id_fkey(full_name), tutor_profiles!reviews_tutor_id_fkey(profiles!tutor_profiles_id_fkey(full_name))",
     )
     .order("created_at", { ascending: false })
     .limit(100)
@@ -402,6 +411,9 @@ export async function listReviews(): Promise<AdminReviewRow[]> {
     rating: r.rating,
     comment: r.comment,
     created_at: r.created_at,
+    hidden_at: r.hidden_at,
+    hidden_reason: r.hidden_reason,
+    tutor_reply: r.tutor_reply,
     student_name: r.student?.full_name ?? "Student",
     tutor_name: r.tutor_profiles?.profiles?.full_name ?? "Tutor",
   }));

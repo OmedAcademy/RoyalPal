@@ -18,6 +18,9 @@ const REVIEWS_PAGE_SIZE = 20;
 export async function getTutorReviews(tutorId: string): Promise<ReviewWithAuthor[]> {
   const supabase = await createClient();
 
+  // Hidden reviews are excluded by RLS itself (migration 0035), not by a
+  // filter here — so a moderated review cannot reappear because someone
+  // forgot a WHERE clause on a new query.
   const { data: reviews, error } = await supabase
     .from("reviews")
     .select("*")
@@ -41,4 +44,16 @@ export async function getTutorReviews(tutorId: string): Promise<ReviewWithAuthor
       author_avatar_url: author?.avatar_url ?? null,
     };
   });
+}
+
+/**
+ * Every review about the signed-in tutor, for their own Reviews screen.
+ *
+ * Deliberately the same RLS-scoped read as the public list, which means a
+ * review hidden by moderation is invisible here too. That is the decision
+ * taken in migration 0035: the usual reason for hiding a review is that the
+ * exchange needs to stop, and handing the tutor a copy would restart it.
+ */
+export async function getMyTutorReviews(tutorId: string): Promise<ReviewWithAuthor[]> {
+  return getTutorReviews(tutorId);
 }

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { activeUserOrError } from "@/lib/supabase/queries";
-import { createReviewSchema } from "@/lib/validations/review";
+import { createReviewSchema, replyToReviewSchema } from "@/lib/validations/review";
 import { NotificationService } from "@/lib/notifications/service";
 
 export type ReviewActionState = {
@@ -85,4 +85,58 @@ export async function createReview(
   revalidatePath(`/student/tutors/${booking.tutor_id}`);
 
   return { message: "Thanks — your review is live." };
+}
+
+/**
+ * A tutor's single reply to a review about them.
+ *
+ * Authorization and the once-only rule both live in the database (migration
+ * 0035): the RLS policy scopes the update to the tutor the review is about,
+ * and protect_review_columns refuses a second reply and refuses any change to
+ * the rating or comment. This action shapes input and translates refusals —
+ * re-checking here would create a second rule free to disagree with the one
+ * that cannot be bypassed.
+ */
+export async function replyToReview(
+  _prevState: ReviewActionState,
+  formData: FormData,
+): Promise<ReviewActionState> {
+  const parsed = replyToReviewSchema.safeParse({
+    reviewId: formData.get("reviewId"),
+    reply: formData.get("reply"),
+  });
+
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  }
+
+  const supabase = await createClient();
+  const auth = await activeUserOrError(supabase);
+  if ("error" in auth) return { error: auth.error };
+
+  const { data: updated, error } = await supabase
+    .from("reviews")
+    .update({ tutor_reply: parsed.data.reply, tutor_replied_at: new Date().toISOString() })
+    .eq("id", parsed.data.reviewId)
+    .select("student_id")
+    .maybeSingle();
+
+  if (error) {
+    if (/already replied/.test(error.message)) {
+      return { error: "You've already replied to this review." };
+    }
+    return { error: "Couldn't post that reply." };
+  }
+  if (!updated) return { error: "That review isn't available to reply to." };
+
+  await NotificationService.emit({
+    userId: updated.student_id,
+    type: "review_replied",
+    title: "A tutor replied to your review",
+    body: parsed.data.reply.slice(0, 140),
+    data: { href: "/student/bookings" },
+  });
+
+  revalidatePath("/tutor/reviews");
+  return { message: "Reply posted." };
 }

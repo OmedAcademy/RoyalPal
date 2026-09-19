@@ -1,26 +1,39 @@
+import type { Metadata } from "next";
 import { listReviews } from "@/lib/supabase/admin-data";
 import { AdminTable, Th, Td } from "@/components/admin/AdminTable";
+import { ReviewModerationActions } from "@/components/admin/ReviewModerationActions";
 import { formatDate } from "@/lib/utils/format";
+
+export const metadata: Metadata = { title: "Reviews — RoyalPal Admin" };
 
 function Stars({ rating }: { rating: number }) {
   return (
     <span aria-label={`${rating} out of 5`} className="whitespace-nowrap text-amber-500">
-      {"★".repeat(rating)}
-      <span className="text-slate-300">{"★".repeat(5 - rating)}</span>
+      <span aria-hidden="true">
+        {"★".repeat(rating)}
+        <span className="text-slate-300">{"★".repeat(5 - rating)}</span>
+      </span>
     </span>
   );
 }
 
 export default async function AdminReviewsPage() {
   const reviews = await listReviews();
+  const hiddenCount = reviews.filter((r) => r.hidden_at !== null).length;
 
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="font-display text-3xl font-semibold tracking-tight">Reviews moderation</h1>
-      <p className="text-muted -mt-2 text-sm">
-        Reviews are immutable by design. Hiding/removal (with an audit trail) requires a moderation
-        policy migration — planned.
-      </p>
+      <div>
+        <h1 className="font-display text-2xl font-semibold tracking-tight sm:text-3xl">
+          Reviews moderation
+        </h1>
+        <p className="text-muted mt-1 text-sm">
+          Reviews cannot be edited — not by their author, not by the tutor, not here. Hiding one
+          keeps the row and its text but removes it from the tutor&apos;s public profile and from
+          their rating. The author is told; the tutor is not.
+          {hiddenCount > 0 ? ` ${hiddenCount} currently hidden.` : ""}
+        </p>
+      </div>
 
       <AdminTable
         isEmpty={reviews.length === 0}
@@ -28,22 +41,37 @@ export default async function AdminReviewsPage() {
         head={
           <>
             <Th>Rating</Th>
-            <Th>Comment</Th>
+            <Th>Review</Th>
             <Th>Student</Th>
             <Th>Tutor</Th>
-            <Th>Date</Th>
+            <Th>When</Th>
+            <Th>Moderation</Th>
           </>
         }
       >
-        {reviews.map((r) => (
-          <tr key={r.id}>
+        {reviews.map((review) => (
+          <tr key={review.id} className={review.hidden_at ? "opacity-60" : undefined}>
             <Td>
-              <Stars rating={r.rating} />
+              <Stars rating={review.rating} />
             </Td>
-            <Td className="text-muted max-w-md">{r.comment ?? "—"}</Td>
-            <Td className="whitespace-nowrap">{r.student_name}</Td>
-            <Td className="whitespace-nowrap">{r.tutor_name}</Td>
-            <Td className="text-muted whitespace-nowrap">{formatDate(r.created_at)}</Td>
+            <Td className="max-w-xs">
+              <span className="block truncate">{review.comment ?? "—"}</span>
+              {review.tutor_reply ? (
+                <span className="text-muted block truncate text-xs italic">
+                  Reply: {review.tutor_reply}
+                </span>
+              ) : null}
+            </Td>
+            <Td className="text-muted">{review.student_name}</Td>
+            <Td className="text-muted">{review.tutor_name}</Td>
+            <Td className="text-muted whitespace-nowrap">{formatDate(review.created_at)}</Td>
+            <Td>
+              <ReviewModerationActions
+                reviewId={review.id}
+                hidden={review.hidden_at !== null}
+                hiddenReason={review.hidden_reason}
+              />
+            </Td>
           </tr>
         ))}
       </AdminTable>

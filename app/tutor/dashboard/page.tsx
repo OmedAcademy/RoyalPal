@@ -204,7 +204,12 @@ export default async function TutorDashboardPage() {
           </Card>
 
           <Card title="Messages">
-            <EmptyRow>Direct messaging with students is coming soon.</EmptyRow>
+            <p className="text-muted py-2 text-sm">
+              A conversation opens with every student who books you.
+            </p>
+            <Link href="/messages" className="text-royal text-sm font-medium hover:underline">
+              Open messages →
+            </Link>
           </Card>
         </div>
       </div>
