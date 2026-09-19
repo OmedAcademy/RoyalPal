@@ -29,6 +29,7 @@ export type Control = { insertError: DbError | null };
 class Query implements PromiseLike<Result<Row[]>> {
   private filters: [string, unknown][] = [];
   private negativeFilters: [string, unknown][] = [];
+  private setFilters: [string, unknown[]][] = [];
   // NOT named `single`: createFakeSupabase exposes a chainable `single()`
   // METHOD by Object.assign-ing it onto the instance, which would overwrite
   // a same-named boolean field and leave it permanently truthy — making
@@ -58,6 +59,15 @@ class Query implements PromiseLike<Result<Row[]>> {
    * payment" guard in startCheckout. */
   neq(column: string, value: unknown): this {
     this.negativeFilters.push([column, value]);
+    return this;
+  }
+
+  /** Membership filter — used by cancelBooking to make the transition
+   * conditional in the database rather than on a status it read a moment
+   * earlier. Real membership semantics: a fake that matched everything would
+   * turn that guard into a no-op and still let its test pass. */
+  in(column: string, values: unknown[]): this {
+    this.setFilters.push([column, values]);
     return this;
   }
 
@@ -95,7 +105,8 @@ class Query implements PromiseLike<Result<Row[]>> {
   private matches(row: Row): boolean {
     return (
       this.filters.every(([c, v]) => row[c] === v) &&
-      this.negativeFilters.every(([c, v]) => row[c] !== v)
+      this.negativeFilters.every(([c, v]) => row[c] !== v) &&
+      this.setFilters.every(([c, vs]) => vs.includes(row[c]))
     );
   }
 

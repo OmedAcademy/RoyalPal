@@ -448,15 +448,47 @@ export async function cancelBooking(
   }
   const user = auth.user;
 
-  const { data: cancelled, error } = await supabase
+  // Migration 0030 stops a participant cancelling a PAID lesson with a direct
+  // write, so the update below goes through the service role — which means the
+  // ownership check RLS used to perform is now this function's job. Without
+  // it, any signed-in user could cancel any booking by guessing its id.
+  const { data: booking } = await supabase
+    .from("bookings")
+    .select("student_id, tutor_id, status")
+    .eq("id", parsed.data.bookingId)
+    .maybeSingle();
+
+  if (!booking || (booking.student_id !== user.id && booking.tutor_id !== user.id)) {
+    // Same answer whether the booking is someone else's or doesn't exist:
+    // distinguishing them turns this into an existence oracle for booking ids.
+    return { error: "Booking not found" };
+  }
+
+  // The same states the Cancel button is rendered for. The status trigger
+  // would refuse anything else anyway, but with a database message rather than
+  // one worth showing a student.
+  if (booking.status !== "pending_payment" && booking.status !== "confirmed") {
+    return { error: "This booking can no longer be cancelled." };
+  }
+
+  // Guarded by `.in("status", ...)`: between the read above and this write the
+  // payment webhook can confirm the booking or the expiry sweep can cancel it.
+  // The filter makes the transition conditional in the database rather than on
+  // a value we read a moment ago.
+  const { data: cancelled, error } = await createAdminClient()
     .from("bookings")
     .update({ status: "cancelled", cancellation_reason: parsed.data.reason })
     .eq("id", parsed.data.bookingId)
+    .in("status", ["pending_payment", "confirmed"])
     .select("student_id, tutor_id")
     .maybeSingle();
 
   if (error) {
     return { error: error.message };
+  }
+
+  if (!cancelled) {
+    return { error: "This booking can no longer be cancelled." };
   }
 
   // Tear down the live classroom so the Meet room is invalidated and both
@@ -465,16 +497,14 @@ export async function cancelBooking(
   await MeetingService.cancelMeeting(parsed.data.bookingId);
 
   // Notify the other participant (whoever didn't cancel).
-  if (cancelled) {
-    const other = cancelled.student_id === user.id ? cancelled.tutor_id : cancelled.student_id;
-    await NotificationService.emit({
-      userId: other,
-      type: "booking_cancelled",
-      title: "A lesson was cancelled",
-      body: parsed.data.reason ?? undefined,
-      data: { href: other === cancelled.tutor_id ? "/tutor/bookings" : "/student/bookings" },
-    });
-  }
+  const other = cancelled.student_id === user.id ? cancelled.tutor_id : cancelled.student_id;
+  await NotificationService.emit({
+    userId: other,
+    type: "booking_cancelled",
+    title: "A lesson was cancelled",
+    body: parsed.data.reason ?? undefined,
+    data: { href: other === cancelled.tutor_id ? "/tutor/bookings" : "/student/bookings" },
+  });
 
   revalidatePath("/student/bookings");
   revalidatePath("/tutor/bookings");
