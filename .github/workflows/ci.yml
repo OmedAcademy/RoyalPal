@@ -140,11 +140,29 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # Syntactically real values, so the bundle exercises the actual inlining
+      # path. The anon key is a valid-shaped JWT carrying role "anon" — which
+      # is also what proves the secret scanner below passes the key that is
+      # SUPPOSED to be there, rather than passing because nothing is.
+      - name: Write placeholder public config
+        run: |
+          cat > .env <<'ENVEOF'
+          EXPO_PUBLIC_API_URL=https://placeholder.royalpal.app
+          EXPO_PUBLIC_SUPABASE_URL=https://placeholder.supabase.co
+          EXPO_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBsYWNlaG9sZGVyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MDAwMDAwMDAsImV4cCI6MjAwMDAwMDAwMH0.placeholder-signature-not-valid
+          ENVEOF
+
       # A real Metro bundle for both platforms. This is what catches an import
       # that type-checks but cannot resolve at runtime, and a duplicate-React
       # regression in metro.config.js — neither of which tsc can see.
       - name: Bundle for iOS
         run: npx expo export --platform ios
 
+      - name: Scan the iOS bundle for server secrets
+        run: npm run check:secrets
+
       - name: Bundle for Android
         run: npx expo export --platform android
+
+      - name: Scan the Android bundle for server secrets
+        run: npm run check:secrets

@@ -30,12 +30,13 @@
     "typescript": "~6.0.3"
   },
   "scripts": {
-    "start": "expo start",
     "android": "expo start --android",
+    "check:secrets": "node scripts/check-bundle-secrets.mjs dist",
     "ios": "expo start --ios",
-    "web": "expo start --web",
+    "lint": "expo lint",
+    "start": "expo start",
     "typecheck": "tsc --noEmit",
-    "lint": "expo lint"
+    "web": "expo start --web"
   },
   "private": true
 }

@@ -101,6 +101,27 @@ POSTed to the server, which _claims_ the token for the signed-in account —
 which is what stops the previous user's lesson reminders landing on the next
 person's lock screen after a shared phone changes hands.
 
+### The rule is enforced, not just written down
+
+```bash
+npx expo export --platform android && npm run check:secrets
+```
+
+`scripts/check-bundle-secrets.mjs` reads the Hermes bytecode Metro actually
+produced and fails on a service-role JWT (all three base64 alignments of the
+`service_role` claim), a Stripe secret or restricted key, a webhook secret, a
+PEM private key, a Google OAuth client secret, or the mere _name_ of a
+server-only variable. CI runs it against both platform bundles on every push.
+
+The realistic mistake is not someone adding `EXPO_PUBLIC_STRIPE_SECRET_KEY`. It
+is importing a server module into a screen and dragging a literal along with
+it — which type-checks, bundles cleanly, and ships.
+
+CI writes a placeholder `.env` first, with a valid-shaped anon JWT. That is
+deliberate: it makes the scan run against a bundle that really does contain the
+public key, so a pass means "the right key is there and the wrong ones are
+not", rather than "nothing is there at all".
+
 ---
 
 ## Running it

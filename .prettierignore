@@ -10,6 +10,7 @@ package-lock.json
 supabase/.temp
 mobile/node_modules
 mobile/.expo
+mobile/dist
 
 # playwright artifacts
 test-results/
