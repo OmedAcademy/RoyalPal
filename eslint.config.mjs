@@ -18,7 +18,10 @@ const eslintConfig = [
     // scripts/, e.g. the Google token minter/verifier). Those are not part of
     // the Next.js app and idiomatically use patterns — ternary-as-statement
     // reporting, top-level await — that the app config flags as noise.
-    ignores: [".next/**", "out/**", "build/**", "next-env.d.ts", "scripts/**"],
+    // `mobile/` is a separate Expo project with its own tsconfig, its own
+    // React Native lint rules and its own node_modules. Linting it with the
+    // Next.js config reports false positives on every React Native idiom.
+    ignores: [".next/**", "out/**", "build/**", "next-env.d.ts", "scripts/**", "mobile/**"],
   },
   {
     rules: {

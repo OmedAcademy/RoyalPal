@@ -17,19 +17,23 @@ describe("invokeAction", () => {
   const initial = {} as { error?: string; message?: string };
 
   it("returns the action's state when it returns normally", async () => {
-    const action = vi.fn(async () => ({ message: "done" }));
+    // Typed with both parameters because that is the Server Action contract —
+    // (previousState, formData) — and the adapter's job is to supply the
+    // second one correctly.
+    const action = vi.fn(async (_prev: typeof initial, _formData: FormData) => ({
+      message: "done",
+    }));
     const result = await invokeAction(action, { a: "1" }, initial);
 
     expect(result).toEqual({ state: { message: "done" } });
-    const formData = action.mock.calls[0][1] as FormData;
-    expect(formData.get("a")).toBe("1");
+    expect(action.mock.calls[0][1].get("a")).toBe("1");
   });
 
   it("stringifies numbers and drops null/undefined, like a real form post", async () => {
-    const action = vi.fn(async () => ({}));
+    const action = vi.fn(async (_prev: typeof initial, _formData: FormData) => ({}));
     await invokeAction(action, { n: 60, empty: null, missing: undefined, s: "x" }, initial);
 
-    const formData = action.mock.calls[0][1] as FormData;
+    const formData = action.mock.calls[0][1];
     expect(formData.get("n")).toBe("60");
     expect(formData.get("s")).toBe("x");
     // Absent rather than the string "null", which a zod schema would then

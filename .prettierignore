@@ -8,3 +8,5 @@ package-lock.json
 .env*
 !.env.local.example
 supabase/.temp
+mobile/node_modules
+mobile/.expo
