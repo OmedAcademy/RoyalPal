@@ -6,6 +6,7 @@ import { greeting } from "@/lib/utils/greeting";
 import { Card, StatTile } from "@/components/ui/Card";
 import { LessonRow } from "@/components/dashboard/LessonRow";
 import { TutorCard } from "@/components/tutor/TutorCard";
+import { getFavoriteTutorIds } from "@/lib/supabase/favorites";
 import { ButtonLink } from "@/components/ui/Button";
 import type { Subject } from "@/types/database";
 
@@ -13,9 +14,10 @@ export default async function StudentDashboardPage() {
   const profile = await requireProfile(["student"]);
   const supabase = await createClient();
 
-  const [dash, { data: subjectRows }] = await Promise.all([
+  const [dash, { data: subjectRows }, favoriteIds] = await Promise.all([
     getStudentDashboard(profile.id),
     supabase.from("subjects").select("*"),
+    getFavoriteTutorIds(),
   ]);
 
   const subjectsById = new Map<number, Subject>((subjectRows ?? []).map((s) => [s.id, s]));
@@ -168,7 +170,7 @@ export default async function StudentDashboardPage() {
             ) : (
               <div className="flex flex-col gap-3">
                 {dash.favorites.map((tutor) => (
-                  <TutorCard key={tutor.id} tutor={tutor} subjectsById={subjectsById} />
+                  <TutorCard key={tutor.id} tutor={tutor} subjectsById={subjectsById} favorited />
                 ))}
               </div>
             )}
@@ -187,7 +189,12 @@ export default async function StudentDashboardPage() {
           </div>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {dash.recommended.map((tutor) => (
-              <TutorCard key={tutor.id} tutor={tutor} subjectsById={subjectsById} />
+              <TutorCard
+                key={tutor.id}
+                tutor={tutor}
+                subjectsById={subjectsById}
+                favorited={favoriteIds.has(tutor.id)}
+              />
             ))}
           </div>
         </section>

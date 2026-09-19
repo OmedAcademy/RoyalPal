@@ -11,6 +11,18 @@ const PROTECTED_PREFIXES = {
 } as const;
 
 /**
+ * Routes any SIGNED-IN role may use. They exist because messaging, settings
+ * and support are the same product for a student and a tutor, and giving each
+ * role its own copy would mean two of everything — two routes, two layouts,
+ * two sets of bugs — for one feature.
+ *
+ * They still need listing here: middleware gates by path prefix, so a route
+ * outside both maps would be reachable while signed out. Suspension is
+ * enforced for these exactly as it is for the role-scoped ones.
+ */
+const AUTHENTICATED_PREFIXES = ["/messages", "/settings", "/support"] as const;
+
+/**
  * Refreshes the Supabase session cookie on every request (required since
  * Server Components can't write cookies themselves) and gates role-scoped
  * route prefixes. This is defense-in-depth's first layer; each protected
@@ -50,8 +62,11 @@ export async function updateSession(request: NextRequest) {
   const matchedPrefix = (
     Object.keys(PROTECTED_PREFIXES) as (keyof typeof PROTECTED_PREFIXES)[]
   ).find((role) => path.startsWith(PROTECTED_PREFIXES[role]));
+  const needsAnyRole = AUTHENTICATED_PREFIXES.some(
+    (prefix) => path === prefix || path.startsWith(`${prefix}/`),
+  );
 
-  if (matchedPrefix) {
+  if (matchedPrefix || needsAnyRole) {
     if (!user) {
       const loginUrl = new URL("/login", request.url);
       loginUrl.searchParams.set("redirectTo", path);
@@ -73,7 +88,9 @@ export async function updateSession(request: NextRequest) {
       return NextResponse.redirect(new URL("/suspended", request.url));
     }
 
-    if (profile.role !== matchedPrefix && profile.role !== "admin") {
+    // Role scoping applies only to the role-prefixed areas; the shared ones
+    // are open to every active, signed-in account.
+    if (matchedPrefix && profile.role !== matchedPrefix && profile.role !== "admin") {
       return NextResponse.redirect(new URL(roleToDashboardPath(profile.role), request.url));
     }
   }

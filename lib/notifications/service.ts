@@ -42,7 +42,10 @@ async function persistAndDispatch(input: NotificationInput): Promise<void> {
     return;
   }
 
-  // Fan out to enabled secondary channels (email now; push/SMS later).
+  // Fan out to enabled secondary channels (email and push; SMS later).
+  // Each channel applies the user's per-category preference itself — see
+  // lib/notifications/channels.ts for why that decision is not made here.
+  const href = typeof input.data?.href === "string" ? input.data.href : null;
   await Promise.allSettled(
     secondaryChannels
       .filter((c) => c.isEnabled())
@@ -51,8 +54,10 @@ async function persistAndDispatch(input: NotificationInput): Promise<void> {
           .deliver({
             userId: input.userId,
             type: input.type,
+            category,
             title: input.title,
             body: input.body ?? null,
+            href,
           })
           .catch((err) =>
             log.error("channel delivery failed", err, { channel: c.name, type: input.type }),

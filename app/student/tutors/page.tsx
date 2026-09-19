@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { searchTutors } from "@/lib/supabase/tutor-search";
 import { TutorFilters } from "@/components/tutor/TutorFilters";
 import { TutorCard } from "@/components/tutor/TutorCard";
+import { getFavoriteTutorIds } from "@/lib/supabase/favorites";
 import type { Subject } from "@/types/database";
 
 export default async function FindTutorsPage({
@@ -17,13 +18,16 @@ export default async function FindTutorsPage({
   const subjectId = params.subject ? Number(params.subject) : undefined;
   const maxPrice = params.maxPrice ? Number(params.maxPrice) : undefined;
 
-  const [{ data: subjects }, tutors] = await Promise.all([
+  const [{ data: subjects }, tutors, favoriteIds] = await Promise.all([
     supabase.from("subjects").select("*").order("category").order("name"),
     searchTutors({
       subjectId: subjectId && Number.isFinite(subjectId) ? subjectId : undefined,
       language: params.language || undefined,
       maxPrice: maxPrice && Number.isFinite(maxPrice) ? maxPrice : undefined,
     }),
+    // One query for the whole page rather than one per card: the alternative
+    // turns a full page of results into that many extra round trips.
+    getFavoriteTutorIds(),
   ]);
 
   const subjectsById = new Map<number, Subject>((subjects ?? []).map((s) => [s.id, s]));
@@ -33,8 +37,7 @@ export default async function FindTutorsPage({
       <div>
         <h1 className="text-xl font-semibold">Find a tutor</h1>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          Browse approved tutors. Booking a lesson is coming in a later milestone — for now you can
-          explore profiles and pricing.
+          Browse approved tutors, check their availability, and book a lesson.
         </p>
       </div>
 
@@ -52,7 +55,12 @@ export default async function FindTutorsPage({
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {tutors.map((tutor) => (
-            <TutorCard key={tutor.id} tutor={tutor} subjectsById={subjectsById} />
+            <TutorCard
+              key={tutor.id}
+              tutor={tutor}
+              subjectsById={subjectsById}
+              favorited={favoriteIds.has(tutor.id)}
+            />
           ))}
         </div>
       )}

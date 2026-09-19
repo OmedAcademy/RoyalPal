@@ -16,6 +16,7 @@ import {
 } from "@/lib/validations/booking";
 import { NotificationService } from "@/lib/notifications/service";
 import { MeetingService } from "@/lib/meet/service";
+import { ensureConversationForBooking } from "@/lib/messaging/service";
 import { logger } from "@/lib/observability/logger";
 import { platformFeeCents, resolvePlatformFeeBps } from "@/lib/pricing/commission";
 import type { Database } from "@/types/database";
@@ -320,6 +321,17 @@ export async function createBooking(
     log.error("failed to start checkout", err, { bookingId: booking.id });
     return { error: "We couldn't start checkout. Please try again." };
   }
+
+  // Open the thread as soon as the booking exists, not when it is paid: a
+  // student whose payment is pending may well need to ask the tutor something
+  // first, and a conversation that only appears after checkout is a
+  // conversation nobody has when they need it. Best-effort by contract — a
+  // messaging failure must never roll back a lesson.
+  await ensureConversationForBooking({
+    bookingId: booking.id,
+    studentId: booking.student_id,
+    tutorId: booking.tutor_id,
+  });
 
   await NotificationService.emit({
     userId: user.id,

@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 import { getTutorById } from "@/lib/supabase/tutor-search";
 import { getTutorReviews } from "@/lib/supabase/reviews";
 import { safeExternalUrl } from "@/lib/utils/url";
+import { isFavorited } from "@/lib/supabase/favorites";
+import { FavoriteButton } from "@/components/tutor/FavoriteButton";
 
 function priceLabel(cents: number, currency: string): string {
   return (cents / 100).toLocaleString(undefined, {
@@ -31,11 +33,12 @@ export default async function TutorDetailPage({ params }: { params: Promise<{ id
   }
 
   const supabase = await createClient();
-  const [{ data: subjects }, reviews] = await Promise.all([
+  const [{ data: subjects }, reviews, favorited] = await Promise.all([
     tutor.subject_ids.length
       ? supabase.from("subjects").select("*").in("id", tutor.subject_ids)
       : Promise.resolve({ data: [] }),
     getTutorReviews(id),
+    isFavorited(id),
   ]);
 
   const initial = tutor.full_name.trim().charAt(0).toUpperCase() || "?";
@@ -57,10 +60,15 @@ export default async function TutorDetailPage({ params }: { params: Promise<{ id
             </span>
           )}
         </div>
-        <div>
+        <div className="min-w-0 flex-1">
           <h1 className="text-xl font-semibold">{tutor.full_name}</h1>
           <p className="text-sm text-zinc-600 dark:text-zinc-400">{tutor.headline}</p>
         </div>
+        <FavoriteButton
+          tutorId={tutor.id}
+          initialFavorited={favorited}
+          tutorName={tutor.full_name}
+        />
       </div>
 
       <div className="flex flex-wrap gap-6 text-sm">

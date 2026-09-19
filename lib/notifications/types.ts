@@ -22,9 +22,49 @@ export type NotificationType =
   | "payout_failed"
   | "review_received"
   | "review_replied"
-  | "system_announcement";
+  | "review_hidden"
+  | "message_received"
+  | "lesson_reminder"
+  | "booking_rescheduled"
+  | "support_reply"
+  | "account_deletion_requested"
+  | "account_deletion_cancelled";
 
-export type NotificationCategory = "bookings" | "payments" | "account" | "reviews" | "system";
+export type NotificationCategory =
+  "bookings" | "payments" | "account" | "reviews" | "messages" | "support" | "system";
+
+/**
+ * The categories a user may switch off, and the label shown next to each
+ * toggle. Everything NOT listed here — password changes, security notices,
+ * account suspension — is transactional and never routed through the
+ * preference check, so there is no row that could switch it off.
+ */
+export const OPTIONAL_CATEGORIES: {
+  category: NotificationCategory;
+  label: string;
+  description: string;
+}[] = [
+  {
+    category: "bookings",
+    label: "Lessons",
+    description: "Confirmations, cancellations, reschedules and reminders.",
+  },
+  {
+    category: "messages",
+    label: "Messages",
+    description: "When the other person in a lesson sends you a message.",
+  },
+  {
+    category: "reviews",
+    label: "Reviews",
+    description: "When you receive a review or a reply to one.",
+  },
+  {
+    category: "payments",
+    label: "Payments",
+    description: "Receipts, refunds and payout activity.",
+  },
+];
 
 export type NotificationMeta = { category: NotificationCategory; icon: string };
 
@@ -45,7 +85,13 @@ export const NOTIFICATION_META: Record<NotificationType, NotificationMeta> = {
   payout_failed: { category: "payments", icon: "🏦" },
   review_received: { category: "reviews", icon: "⭐" },
   review_replied: { category: "reviews", icon: "💬" },
-  system_announcement: { category: "system", icon: "📢" },
+  review_hidden: { category: "reviews", icon: "🚫" },
+  message_received: { category: "messages", icon: "✉️" },
+  lesson_reminder: { category: "bookings", icon: "⏰" },
+  booking_rescheduled: { category: "bookings", icon: "🔁" },
+  support_reply: { category: "support", icon: "🎧" },
+  account_deletion_requested: { category: "account", icon: "⚠️" },
+  account_deletion_cancelled: { category: "account", icon: "↩️" },
 };
 
 export const FALLBACK_META: NotificationMeta = { category: "system", icon: "🔔" };
