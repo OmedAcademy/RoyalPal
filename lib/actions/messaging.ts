@@ -3,8 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { activeUserOrError } from "@/lib/supabase/queries";
-import { sendMessageSchema, markConversationReadSchema } from "@/lib/validations/messaging";
-import { markConversationRead, notifyNewMessage } from "@/lib/messaging/service";
+import { sendMessageSchema } from "@/lib/validations/messaging";
+import { notifyNewMessage } from "@/lib/messaging/service";
 import { consumeRateLimit, rateLimitMessage } from "@/lib/rate-limit/limiter";
 import { logger } from "@/lib/observability/logger";
 
@@ -94,18 +94,4 @@ export async function sendMessage(
   revalidatePath("/messages");
   revalidatePath(`/messages/${parsed.data.conversationId}`);
   return { sent: true };
-}
-
-export async function markMessagesRead(formData: FormData): Promise<void> {
-  const parsed = markConversationReadSchema.safeParse({
-    conversationId: formData.get("conversationId"),
-  });
-  if (!parsed.success) return;
-
-  const supabase = await createClient();
-  const auth = await activeUserOrError(supabase);
-  if ("error" in auth) return;
-
-  await markConversationRead(parsed.data.conversationId, auth.user.id);
-  revalidatePath("/messages");
 }

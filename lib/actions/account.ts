@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { activeUserOrError } from "@/lib/supabase/queries";
 import { setPreference } from "@/lib/notifications/preferences";
-import { registerPushToken, unregisterPushToken } from "@/lib/notifications/push";
+import { registerPushToken } from "@/lib/notifications/push";
 import { NotificationService } from "@/lib/notifications/service";
 import { DELETION_GRACE_DAYS } from "@/lib/account/anonymize";
 import { logger } from "@/lib/observability/logger";
@@ -111,12 +111,6 @@ export async function removeDevice(
 
   revalidatePath("/settings/notifications");
   return { message: "This device won't receive notifications any more." };
-}
-
-/** Unregisters a token without needing a session — used on sign-out. */
-export async function forgetDeviceToken(token: string): Promise<void> {
-  if (!token) return;
-  await unregisterPushToken(token);
 }
 
 const deletionSchema = z.object({

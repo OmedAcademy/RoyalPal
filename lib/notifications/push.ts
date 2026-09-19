@@ -82,10 +82,6 @@ export async function registerPushToken(params: {
   }
 }
 
-export async function unregisterPushToken(token: string): Promise<void> {
-  await createAdminClient().from("push_tokens").delete().eq("token", token);
-}
-
 /** Every live token for a user. Disabled tokens are excluded, not deleted. */
 async function activeTokensFor(userId: string): Promise<string[]> {
   const { data } = await createAdminClient()

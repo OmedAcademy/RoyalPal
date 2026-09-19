@@ -62,10 +62,3 @@ export function navigationFor(role: UserRole, counts: { unreadMessages?: number 
     { href: "/admin/audit", label: "Audit", icon: "shield", primary: true },
   ];
 }
-
-/** Where a role's "home" is, used by the shell's logo link. */
-export function homeFor(role: UserRole): string {
-  if (role === "student") return "/student/dashboard";
-  if (role === "tutor") return "/tutor/dashboard";
-  return "/admin";
-}

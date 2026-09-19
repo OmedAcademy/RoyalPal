@@ -10,7 +10,3 @@ export const sendMessageSchema = z.object({
     // form agree on the limit rather than the user discovering it as a 500.
     .max(4000, "Messages are limited to 4000 characters"),
 });
-
-export const markConversationReadSchema = z.object({
-  conversationId: z.string().uuid(),
-});
