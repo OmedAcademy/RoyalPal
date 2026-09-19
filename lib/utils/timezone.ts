@@ -87,7 +87,17 @@ export function utcToZonedParts(
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-    hour12: false,
+    // `hourCycle: "h23"`, never `hour12: false`: the two are NOT synonyms.
+    // `hour12: false` only asks for *a* 24-hour cycle and lets the locale pick
+    // between h23 (00..23) and h24 (01..24); on the ICU shipped with Node 20
+    // (what CI runs) en-CA picks h24, so midnight formats as hour "24".
+    // Observed there while passing locally on Node 22, whose newer ICU always
+    // resolves `hour12: false` to h23: 00:00 Asia/Tokyo round-tripped to
+    // "2026-07-15 24:00" and broke the inverse-of-zonedTimeToUtc contract.
+    // (The date part is unaffected — ICU keeps 2026-07-15 — so only `time`
+    // goes wrong, but "24:00" compares equal to nothing and parses as hour 24.)
+    // `hourCycle` pins the cycle regardless of locale or ICU version.
+    hourCycle: "h23",
     weekday: "short",
   }).formatToParts(instant);
 

@@ -128,6 +128,48 @@ describe("utcToZonedParts", () => {
   });
 });
 
+describe("utcToZonedParts — midnight is 00:00, never 24:00", () => {
+  /**
+   * Regression: the formatter used `hour12: false`, which only asks for *a*
+   * 24-hour cycle and lets the locale pick between h23 (00..23) and h24
+   * (01..24). On the ICU shipped with Node 20 (CI) en-CA picks h24, so
+   * midnight came back as "24:00"; Node 22's newer ICU always picks h23, so
+   * the bug was invisible locally and only ever failed in CI.
+   *
+   * Only `time` was affected — the date part stayed on the correct day — and
+   * today's single production caller reads `date` alone, so nothing user-facing
+   * was broken. What broke is the contract this function exists to provide:
+   * being the exact inverse of zonedTimeToUtc. The next caller to read `time`
+   * (an availability rule keyed "00:00", a slot label) is the one that would
+   * have paid for it.
+   */
+  const midnightCases: [string, string][] = [
+    ["Asia/Tokyo", "2026-07-14T15:00:00Z"], // +09:00 → Jul 15 00:00
+    ["UTC", "2026-07-15T00:00:00Z"],
+    ["America/New_York", "2026-07-15T04:00:00Z"], // -04:00 → Jul 15 00:00
+    ["Asia/Kathmandu", "2026-07-14T18:15:00Z"], // +05:45 → Jul 15 00:00
+    ["Australia/Sydney", "2026-07-14T14:00:00Z"], // +10:00 → Jul 15 00:00
+  ];
+
+  for (const [tz, instant] of midnightCases) {
+    it(`${tz} midnight renders as 2026-07-15 00:00`, () => {
+      const parts = utcToZonedParts(new Date(instant), tz);
+      expect(`${parts.date} ${parts.time}`).toBe("2026-07-15 00:00");
+    });
+  }
+
+  it("never emits an hour outside 00-23 across a full day in every tested zone", () => {
+    for (const [tz] of midnightCases) {
+      for (let minutes = 0; minutes < 24 * 60; minutes += 15) {
+        const instant = new Date(Date.UTC(2026, 6, 15) + minutes * 60_000);
+        const hour = Number(utcToZonedParts(instant, tz).time.slice(0, 2));
+        expect(hour, `${tz} at +${minutes}min`).toBeLessThanOrEqual(23);
+        expect(hour, `${tz} at +${minutes}min`).toBeGreaterThanOrEqual(0);
+      }
+    }
+  });
+});
+
 describe("addDays", () => {
   it("adds across month and year boundaries", () => {
     expect(addDays("2026-01-31", 1)).toBe("2026-02-01");
