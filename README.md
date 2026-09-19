@@ -4,25 +4,96 @@ A global tutoring marketplace — students discover tutors, book and pay for les
 
 **Teach Without Borders. Learn Without Limits.**
 
+RoyalPal runs on the **web, iOS and Android** from one backend.
+
 ---
 
-> **Payments status:** Stripe Connect Express is code-complete and unit-tested
-> but has **never run against real Stripe** — no keys are configured. The app
-> degrades gracefully without them (payment paths decline with a clear reason;
-> everything else works). Migration `0026` is also **not yet applied** to the
-> remote database. See [`docs/STRIPE_STATUS.md`](docs/STRIPE_STATUS.md) before
-> touching anything payment-related.
+## Status, stated plainly
+
+> **Payments are intentionally unconfigured.** Stripe Connect Express is
+> code-complete and unit-tested and has **never run against real Stripe**. With
+> no keys set the app degrades honestly: browsing, profiles, search, messaging,
+> support, reviews and cancellation all work, and booking declines with a clear
+> message _before_ creating a row. See
+> [`docs/STRIPE_STATUS.md`](docs/STRIPE_STATUS.md).
+
+> **Production is behind by twelve migrations** (`0028`–`0039`), and four of
+> them break the live site if applied before the matching code is deployed.
+> [`docs/MIGRATIONS.md`](docs/MIGRATIONS.md) is the procedure — read it before
+> touching the database.
+
+> **Email, push and Google Meet are dormant** until their keys are set. Each
+> one is wired and guarded; none has ever delivered anything from this
+> environment.
+
+---
+
+## Architecture
+
+The rule that shapes everything: **business logic exists once.** Every mobile
+write goes through `/api/v1/*`, and every one of those routes delegates to the
+same Server Action the web form posts to. Price derivation, slot validation,
+the cancellation policy, the refund rules, the age gate and every authorization
+check are reached by two transports and implemented in one place.
+
+```
+   iOS app  ─┐
+             ├─►  /api/v1/*  ─►  Server Actions  ─►  Supabase (RLS + triggers)
+Android app ─┘                         ▲
+                                       │
+   Web app  ──────────────────────────-┘   (same actions, via <form>)
+```
+
+Authorization is layered, and the database is the layer that cannot be
+bypassed: middleware → `requireProfile()` → `activeUserOrError()` → Row Level
+Security → column-lock triggers.
 
 ## Stack
 
-| Layer     | Choice                                                     |
-| --------- | ---------------------------------------------------------- |
-| Framework | Next.js 15 (App Router, Server Components, Server Actions) |
-| Language  | TypeScript (strict)                                        |
-| Data      | Supabase — Postgres + Auth + Storage, Row Level Security   |
-| Payments  | Stripe Checkout (Connect payouts not yet implemented)      |
-| Styling   | Tailwind CSS v4 with CSS-variable design tokens            |
-| Tests     | Vitest                                                     |
+| Layer          | Choice                                                                                |
+| -------------- | ------------------------------------------------------------------------------------- |
+| Web            | Next.js 15 (App Router, Server Components, Server Actions)                            |
+| Mobile         | Expo SDK 57 / React Native 0.86, expo-router — see [`docs/MOBILE.md`](docs/MOBILE.md) |
+| Language       | TypeScript (strict), everywhere                                                       |
+| Data           | Supabase — Postgres + Auth + Storage, RLS on every table                              |
+| Payments       | Stripe Connect Express (destination charges) — unconfigured                           |
+| Email          | Resend — dormant until keyed                                                          |
+| Push           | Expo Push → APNs / FCM                                                                |
+| Video          | Google Meet via the Calendar API — dormant until keyed                                |
+| Scheduled work | Vercel Cron → `/api/cron/*`                                                           |
+| Styling        | Tailwind CSS v4 with CSS-variable design tokens                                       |
+| Tests          | Vitest, including real-Postgres (PGlite) RLS tests                                    |
+
+---
+
+## Documentation
+
+| Document                                                                         | For                                                  |
+| -------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)                                       | Deploying, env vars, cron, rollback, troubleshooting |
+| [`docs/MIGRATIONS.md`](docs/MIGRATIONS.md)                                       | **Read before touching production's database**       |
+| [`docs/MOBILE.md`](docs/MOBILE.md)                                               | The iOS and Android apps, builds, store readiness    |
+| [`docs/STRIPE_STATUS.md`](docs/STRIPE_STATUS.md)                                 | Where payments stand, and what surprises await       |
+| [`docs/STRIPE_TEST_MODE_VERIFICATION.md`](docs/STRIPE_TEST_MODE_VERIFICATION.md) | Turning "tested against mocks" into "verified"       |
+| [`docs/RECONCILIATION_DESIGN.md`](docs/RECONCILIATION_DESIGN.md)                 | Designed, deliberately not built yet                 |
+
+---
+
+## Legal
+
+Seven documents live under `/legal`. Every one carries a visible **awaiting
+legal review** banner and inline flags on the clauses a lawyer must decide.
+They describe what the software genuinely does — a factual starting point, not
+a substitute for advice.
+
+Two positions are worth knowing before reading anything else:
+
+- **RoyalPal is 18+**, enforced inside the `auth.users` insert, not merely
+  asked on a form. That is the restrictive default chosen because serving
+  minors carries safeguarding duties nobody here has been advised on.
+- **Messages are retained and admin-readable**, and cannot be edited or deleted
+  by either party. A report about a message nobody may read cannot be
+  investigated. Both facts are stated to users before they type anything.
 
 ---
 
@@ -50,11 +121,27 @@ npm run dev
 
 ### Database
 
-Migrations are plain SQL in `supabase/migrations`, applied in filename order:
+39 migrations, plain SQL in `supabase/migrations`, applied in filename order:
 
 ```bash
 npx supabase db push
 ```
+
+⚠️ Against **production** that command is not safe on its own — four of the
+outstanding migrations remove a permission the currently-deployed code relies
+on. [`docs/MIGRATIONS.md`](docs/MIGRATIONS.md) has the ordering, the
+verification query and the rollback.
+
+### Tests
+
+```bash
+npm run typecheck && npm run lint && npm test && npm run build
+cd mobile && npm run typecheck && npx expo export --platform ios
+```
+
+The database tests run every migration against a real Postgres (PGlite) and
+exercise RLS and triggers as each actor — anonymous, student, tutor, admin,
+service role. They are where the security posture is actually pinned.
 
 ### Stripe: shared account with Lingora
 

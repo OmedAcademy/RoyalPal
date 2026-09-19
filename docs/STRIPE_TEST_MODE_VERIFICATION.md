@@ -33,10 +33,12 @@ trustworthy there. Until `0029` is applied, a signed-in user can insert a
 booking with any status or price, and change a booking's price or time after
 payment.
 
-Both are in `docs/PENDING_MIGRATIONS.sql`. Apply it only once every production
-deployment that uses this database runs the service-role writes in
-`lib/actions/stripe-connect.ts` (needed by `0028`) and `lib/actions/booking.ts`
-(needed by `0029`), or tutor onboarding and booking creation break.
+Both are part of a larger backlog now — production is behind by twelve
+migrations (`0028`–`0039`), not two. **`docs/MIGRATIONS.md` is the procedure**;
+it lists which ones remove a permission the deployed code still uses, and in
+what order. The rule that matters: deploy the code first, apply the migration
+second, or tutor onboarding, booking creation, cancellation and signup each
+break outright for everyone.
 
 ---
 

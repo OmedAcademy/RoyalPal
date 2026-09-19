@@ -1,4 +1,20 @@
 -- =====================================================================
+-- SUPERSEDED — READ docs/MIGRATIONS.md FIRST.
+--
+-- This file covers 0028 and 0029 ONLY. It was written when those were the
+-- only two migrations outstanding. Production is now behind by TWELVE
+-- (0028-0039), and applying just these two leaves the database in a state
+-- the deployed code does not expect.
+--
+-- Kept, rather than deleted, because its pre-check and its seven-row
+-- verification are still correct FOR THESE TWO MIGRATIONS. Renamed so it
+-- cannot be mistaken for the whole backlog.
+--
+-- The current procedure, the ordering constraints and the verification query
+-- for all twelve are in docs/MIGRATIONS.md.
+-- =====================================================================
+
+-- =====================================================================
 -- PENDING MIGRATIONS — 0028 and 0029, for the production database.
 --
 -- Applied on production:      0001 .. 0027

@@ -12,17 +12,18 @@ document keeps them apart.
 
 Exactly three things, all requiring a human with dashboard access:
 
-| #   | Blocker                                                                                                | Who      |
-| --- | ------------------------------------------------------------------------------------------------------ | -------- |
-| 1   | Apply `docs/PENDING_MIGRATIONS.sql` (0028, 0029) to the remote DB, only after the new code is deployed | operator |
-| 2   | Put test-mode keys in `.env.local` (`sk_test_` / `pk_test_`)                                           | operator |
-| 3   | Enable Connect **Express** in the Stripe Dashboard, Test mode                                          | operator |
+| #   | Blocker                                                                                            | Who      |
+| --- | -------------------------------------------------------------------------------------------------- | -------- |
+| 1   | Apply the outstanding migrations (0028-0039) — see `docs/MIGRATIONS.md`, and deploy the code FIRST | operator |
+| 2   | Put test-mode keys in `.env.local` (`sk_test_` / `pk_test_`)                                       | operator |
+| 3   | Enable Connect **Express** in the Stripe Dashboard, Test mode                                      | operator |
 
 Then follow `docs/STRIPE_TEST_MODE_VERIFICATION.md` end to end.
 
 Migrations `0001`–`0027` **are** applied remotely; `0027`'s trigger check has
-not been run there yet. `0028` and `0029` are **not**. The file is written to be
-safe to re-run if a paste into the SQL editor fails partway.
+not been run there yet. `0028` through `0039` are **not** — twelve of them, and
+four remove a permission the currently-deployed code still uses, so the order
+and the timing both matter. `docs/MIGRATIONS.md` is the procedure.
 
 ## Behaviour with no keys configured (today's state)
 
