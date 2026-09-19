@@ -18,7 +18,8 @@ export type NavIconName =
   | "shield"
   | "users"
   | "card"
-  | "life-ring";
+  | "life-ring"
+  | "bell";
 
 const PATHS: Record<NavIconName, string> = {
   home: "M3 10.5 12 3l9 7.5M5.25 9.75V20a1 1 0 0 0 1 1h3.5v-5.5h4.5V21h3.5a1 1 0 0 0 1-1V9.75",
@@ -37,6 +38,7 @@ const PATHS: Record<NavIconName, string> = {
   card: "M3.5 8.5h17M5 6h14a1.5 1.5 0 0 1 1.5 1.5v9A1.5 1.5 0 0 1 19 18H5a1.5 1.5 0 0 1-1.5-1.5v-9A1.5 1.5 0 0 1 5 6Z",
   "life-ring":
     "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0-5.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm2.5-6 3-3m-9 9-3 3m9 0 3 3m-9-9-3-3",
+  bell: "M18 16V10.5a6 6 0 0 0-12 0V16l-2 2.5h16L18 16Zm-8 3.5a2 2 0 0 0 4 0",
 };
 
 export function NavIcon({ name, className = "" }: { name: NavIconName; className?: string }) {

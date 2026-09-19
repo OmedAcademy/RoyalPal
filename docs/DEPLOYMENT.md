@@ -115,6 +115,35 @@ review" rather than as anything resembling a cron problem.
 
 ---
 
+## Verifying delivery after a deploy
+
+**Admin → Delivery** (`/admin/delivery`) is the first thing to open after
+adding or rotating a notification credential.
+
+It reports what the deployment can actually deliver — whether the email
+provider has both of its variables, whether Expo push is authenticated — and
+sends a test through every channel to **your own account**, reporting each
+channel's own answer including the provider's error text.
+
+Why it exists: every secondary channel stays dormant until its credentials are
+set, and `NotificationService.emit` swallows delivery failures by contract so a
+broken mailbox can never fail a booking. Both decisions are correct and
+together they mean **a misconfigured deployment looks identical to a working
+one from the outside** — notifications appear in the in-app feed and simply
+never arrive anywhere else. Without this page the first person to notice is a
+student who missed a lesson.
+
+The test is self-only (the recipient comes from the session and cannot be
+named), bypasses your own notification preferences so a muted category is never
+mistaken for a broken channel, and is recorded in the audit log.
+
+> A green push result means **Expo accepted it**, not that a phone showed it.
+> Expo answers before the device does. Green push with nothing on the lock
+> screen means the token is stale or the device has notifications off — not
+> that the server is broken.
+
+---
+
 ## Rolling back
 
 ```bash
@@ -133,6 +162,7 @@ been applied in between. See `docs/MIGRATIONS.md`.
 | ---------------------------------------- | -------------------------------------------------------------- |
 | Email confirmation link errors           | `/auth/callback` not in Supabase's redirect allowlist (step 5) |
 | No email arrives, anywhere               | `RESEND_API_KEY` unset, or the sending domain is unverified    |
+| Not sure whether a channel works at all  | Open **Admin → Delivery** and send yourself a test             |
 | "Booking is temporarily unavailable"     | Stripe unconfigured. Expected today                            |
 | Lessons never reach "completed"          | `/api/cron/lesson-lifecycle` failing — check `CRON_SECRET`     |
 | Reviews impossible to leave              | Same cause as above; a review needs a completed lesson         |

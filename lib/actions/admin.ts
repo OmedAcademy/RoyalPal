@@ -7,6 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { NotificationService } from "@/lib/notifications/service";
 import { refundBookingPayment } from "@/lib/stripe/refunds";
 import { isStripeConfigured } from "@/lib/stripe/client";
+import { sendSelfTest, type ProbeResult } from "@/lib/notifications/diagnostics";
 import { optionalText } from "@/lib/validations/shared";
 import { logger } from "@/lib/observability/logger";
 
@@ -345,4 +346,45 @@ export async function unhideReview(
   revalidatePath("/admin/reviews");
   revalidatePath(`/student/tutors/${review.tutor_id}`);
   return { message: "Review restored." };
+}
+
+export type DeliveryTestState = AdminActionState & { results?: ProbeResult[] };
+
+/**
+ * Sends a test notification through every channel to the ACTING ADMIN, and
+ * reports what each one said.
+ *
+ * The recipient is taken from the authorized session and cannot be named by
+ * the caller. A "send a test to any user" control would be a spam primitive
+ * with an admin badge on it, and there is no operational need for one: what an
+ * operator has to know is whether the deployment can deliver at all, and their
+ * own inbox answers that.
+ *
+ * Audited like every other privileged action, so a mailbox full of tests has a
+ * name attached to it.
+ */
+export async function sendDeliveryTest(
+  _prev: DeliveryTestState,
+  _formData: FormData,
+): Promise<DeliveryTestState> {
+  const auth = await authorizeAdmin();
+  if (!auth.ok) return { error: auth.error };
+
+  const results = await sendSelfTest(auth.adminId);
+  await logAction(auth.adminId, "delivery_test", auth.adminId);
+
+  log.info("delivery test sent", {
+    adminId: auth.adminId,
+    failed: results.filter((result) => !result.ok).map((result) => result.channel),
+  });
+
+  revalidatePath("/admin/delivery");
+
+  const failures = results.filter((result) => !result.ok).length;
+  return {
+    results,
+    message: failures === 0 ? "All channels accepted the test." : undefined,
+    error:
+      failures > 0 ? `${failures} of ${results.length} channels could not deliver.` : undefined,
+  };
 }

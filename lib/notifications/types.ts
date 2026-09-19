@@ -28,7 +28,9 @@ export type NotificationType =
   | "booking_rescheduled"
   | "support_reply"
   | "account_deletion_requested"
-  | "account_deletion_cancelled";
+  | "account_deletion_cancelled"
+  // Admin → Delivery only. Never emitted by business logic.
+  | "delivery_test";
 
 export type NotificationCategory =
   "bookings" | "payments" | "account" | "reviews" | "messages" | "support" | "system";
@@ -92,6 +94,7 @@ export const NOTIFICATION_META: Record<NotificationType, NotificationMeta> = {
   support_reply: { category: "support", icon: "🎧" },
   account_deletion_requested: { category: "account", icon: "⚠️" },
   account_deletion_cancelled: { category: "account", icon: "↩️" },
+  delivery_test: { category: "system", icon: "🧪" },
 };
 
 export const FALLBACK_META: NotificationMeta = { category: "system", icon: "🔔" };
