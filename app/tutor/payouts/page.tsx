@@ -1,10 +1,10 @@
 import { requireProfile } from "@/lib/supabase/queries";
-import { createClient } from "@/lib/supabase/server";
 import { isStripeConfigured } from "@/lib/stripe/client";
 import { hasPausedBankPayouts, resolvePayoutStatus } from "@/lib/stripe/account-status";
 import { Card } from "@/components/ui/Card";
 import { ConnectOnboardingButton } from "@/components/tutor/ConnectOnboardingButton";
 import { StripeDashboardButton } from "@/components/tutor/StripeDashboardButton";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 /**
  * Doubles as both the Account Link return_url and refresh_url target (see
@@ -36,9 +36,13 @@ export default async function TutorPayoutsPage({
 }) {
   const profile = await requireProfile(["tutor"]);
   const { connect } = await searchParams;
-  const supabase = await createClient();
-
-  const { data: tutorProfile } = await supabase
+  // Service role, not the request client: migration 0041 revokes SELECT on the
+  // Stripe columns from `authenticated`, because a policy that shares a tutor's
+  // headline cannot also be allowed to share their connected-account id. This
+  // page is the tutor reading their OWN payout state, so it is scoped to the
+  // id requireProfile just authorized — the privilege buys column access, not
+  // a wider row.
+  const { data: tutorProfile } = await createAdminClient()
     .from("tutor_profiles")
     .select(
       "stripe_account_id, stripe_charges_enabled, stripe_payouts_enabled, stripe_details_submitted, stripe_requirements_due, stripe_disabled_reason",

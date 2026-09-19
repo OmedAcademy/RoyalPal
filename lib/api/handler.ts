@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { logger } from "@/lib/observability/logger";
 import type { Profile, UserRole } from "@/types/database";
+import { PROFILE_CLIENT_COLUMNS } from "@/lib/supabase/columns";
 
 const log = logger.child({ component: "api" });
 
@@ -57,7 +58,11 @@ export async function requireApiUser(options?: {
     return { response: apiError("Sign in to continue", 401, "unauthenticated") };
   }
 
-  const { data: profile } = await supabase.from("profiles").select("*").eq("id", user.id).single();
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select(PROFILE_CLIENT_COLUMNS)
+    .eq("id", user.id)
+    .single();
 
   if (!profile) {
     return { response: apiError("No profile on record", 403, "no_profile") };

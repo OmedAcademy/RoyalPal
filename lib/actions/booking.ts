@@ -71,7 +71,11 @@ async function startCheckout(
   const [{ data: subject }, { data: tutor }, { data: tutorProfile }] = await Promise.all([
     supabase.from("subjects").select("name").eq("id", booking.subject_id).single(),
     supabase.from("profiles").select("full_name").eq("id", booking.tutor_id).single(),
-    supabase
+    // Service role: 0041 withholds stripe_account_id from `authenticated`,
+    // because a student who can see a tutor's headline must not also be able
+    // to read their connected-account id. The booking row this reads from has
+    // already been created and authorized for this student.
+    createAdminClient()
       .from("tutor_profiles")
       .select("stripe_account_id")
       .eq("id", booking.tutor_id)
@@ -200,7 +204,16 @@ export async function createBooking(
     return { error: "Booking is temporarily unavailable. Please try again later." };
   }
 
-  const { data: tutorProfile } = await supabase
+  // Service role, because platform_fee_bps is the tutor's negotiated
+  // commission rate and 0041 withholds it from `authenticated` — a student
+  // booking a lesson has no business reading what the platform charges that
+  // tutor, and neither does a competing tutor.
+  //
+  // Bypassing RLS costs nothing here: the policy this replaces admitted the
+  // row only when the tutor was approved, and the very next line refuses
+  // anything that is not approved. The check below IS the authorization, and
+  // it is strictly the same condition.
+  const { data: tutorProfile } = await createAdminClient()
     .from("tutor_profiles")
     .select(
       "hourly_rate_cents, trial_price_cents, currency, verification_status, stripe_charges_enabled, platform_fee_bps",

@@ -12,6 +12,7 @@ import { ButtonLink } from "@/components/ui/Button";
 import { PayoutStatusBanner } from "@/components/tutor/PayoutStatusBanner";
 import { isStripeConfigured } from "@/lib/stripe/client";
 import type { ReviewWithAuthor } from "@/lib/supabase/reviews";
+import { TUTOR_PROFILE_CLIENT_COLUMNS } from "@/lib/supabase/columns";
 
 const VERIFICATION_BADGE: Record<string, string> = {
   approved: "bg-emerald-100 text-emerald-800",
@@ -50,7 +51,7 @@ export default async function TutorDashboardPage() {
 
   const { data: tutorProfile } = await supabase
     .from("tutor_profiles")
-    .select("*")
+    .select(TUTOR_PROFILE_CLIENT_COLUMNS)
     .eq("id", profile.id)
     .maybeSingle();
 

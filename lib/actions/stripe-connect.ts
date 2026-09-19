@@ -77,7 +77,9 @@ export async function startTutorOnboarding(
     };
   }
 
-  const { data: tutorProfile } = await supabase
+  // Service role: 0041 withholds stripe_account_id from `authenticated`.
+  // Scoped to the caller's own id, which activeUserOrError has authorized.
+  const { data: tutorProfile } = await createAdminClient()
     .from("tutor_profiles")
     .select("stripe_account_id")
     .eq("id", userId)
@@ -172,7 +174,9 @@ export async function openStripeDashboard(
   }
   const userId = auth.user.id;
 
-  const { data: tutorProfile } = await supabase
+  // Service role: 0041 withholds stripe_account_id from `authenticated`.
+  // Scoped to the caller's own id, which activeUserOrError has authorized.
+  const { data: tutorProfile } = await createAdminClient()
     .from("tutor_profiles")
     .select("stripe_account_id")
     .eq("id", userId)

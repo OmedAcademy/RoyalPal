@@ -713,9 +713,50 @@ export interface Database {
   };
 }
 
-export type Profile = Database["public"]["Tables"]["profiles"]["Row"];
+/**
+ * A profile as an RLS-scoped CLIENT can read it.
+ *
+ * `phone` and `date_of_birth` are absent because migration 0041 revokes SELECT
+ * on those two columns from `authenticated` — RLS scopes rows, not columns, so
+ * the policies that share a tutor's name were sharing their date of birth too.
+ * Omitting them here means a component that reaches for one fails to compile
+ * rather than failing at runtime with "permission denied for column".
+ *
+ * Privileged code that needs the full row (signup, anonymisation, diagnostics)
+ * goes through the service role and uses ProfileRow.
+ */
+export type Profile = Omit<
+  Database["public"]["Tables"]["profiles"]["Row"],
+  "phone" | "date_of_birth"
+>;
+
+/** The complete row, readable only through the service role. */
+export type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"];
 export type StudentProfile = Database["public"]["Tables"]["student_profiles"]["Row"];
 export type TutorProfile = Database["public"]["Tables"]["tutor_profiles"]["Row"];
+
+/**
+ * A tutor profile as an RLS-scoped CLIENT can read it.
+ *
+ * Migration 0041 revokes SELECT on the tutor's Stripe and commission state
+ * from `authenticated`: a student who can see a headline must not also be able
+ * to read the connected-account id or the negotiated commission rate, and RLS
+ * scopes rows rather than columns. Omitting them here turns a query that would
+ * fail at runtime with "permission denied for column" into a compile error.
+ *
+ * Privileged readers — the payouts page, Connect onboarding, checkout's
+ * destination-charge lookup, the admin console and the Stripe webhooks — use
+ * the service role and the full TutorProfile type.
+ */
+export type TutorProfileClient = Omit<
+  TutorProfile,
+  | "stripe_account_id"
+  | "stripe_payouts_enabled"
+  | "stripe_details_submitted"
+  | "stripe_requirements_due"
+  | "stripe_disabled_reason"
+  | "platform_fee_bps"
+>;
 export type Subject = Database["public"]["Tables"]["subjects"]["Row"];
 export type AvailabilityRule = Database["public"]["Tables"]["availability_rules"]["Row"];
 export type AvailabilityException = Database["public"]["Tables"]["availability_exceptions"]["Row"];

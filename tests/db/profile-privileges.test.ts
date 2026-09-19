@@ -154,11 +154,16 @@ describe("a user cannot change their own account status", () => {
 });
 
 describe("legitimate profile updates still work", () => {
+  // `phone` is written but NOT returned. Migration 0041 revokes SELECT on it
+  // from `authenticated`, so a RETURNING clause naming it makes the whole
+  // statement fail with "permission denied for column" — the write is still
+  // allowed, the read-back is not. The asymmetry is deliberate and is asserted
+  // on its own below.
   const SELF_SERVICE_UPDATE = `
     update public.profiles
     set full_name = $2, country = $3, timezone = $4, phone = $5, avatar_url = $6
     where id = $1
-    returning full_name, country, timezone, phone, avatar_url, role, status`;
+    returning full_name, country, timezone, avatar_url, role, status`;
 
   it("lets a student update every self-service field", async () => {
     const rows = await runAs(db, user(student), SELF_SERVICE_UPDATE, [
@@ -175,7 +180,6 @@ describe("legitimate profile updates still work", () => {
         full_name: "Sam Updated",
         country: "Ireland",
         timezone: "Europe/Dublin",
-        phone: "+353 1 000 0000",
         avatar_url: "https://example.test/avatars/sam.png",
         role: "student",
         status: "active",
@@ -198,7 +202,6 @@ describe("legitimate profile updates still work", () => {
         full_name: "Tia Updated",
         country: "United Kingdom",
         timezone: "Europe/London",
-        phone: null,
         avatar_url: null,
         role: "tutor",
         status: "active",

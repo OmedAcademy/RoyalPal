@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { roleToDashboardPath } from "@/lib/utils/auth";
 import type { Database, Profile, UserRole } from "@/types/database";
+import { PROFILE_CLIENT_COLUMNS } from "@/lib/supabase/columns";
 
 /**
  * Authenticated-AND-active check for Server Actions.
@@ -64,7 +65,11 @@ export async function requireProfileAllowingSuspended(allowedRoles: UserRole[]):
 
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase.from("profiles").select("*").eq("id", user.id).single();
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select(PROFILE_CLIENT_COLUMNS)
+    .eq("id", user.id)
+    .single();
   if (!profile) redirect("/login");
 
   if (!allowedRoles.includes(profile.role) && profile.role !== "admin") {
@@ -84,7 +89,11 @@ export async function requireProfile(allowedRoles: UserRole[]): Promise<Profile>
     redirect("/login");
   }
 
-  const { data: profile } = await supabase.from("profiles").select("*").eq("id", user.id).single();
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select(PROFILE_CLIENT_COLUMNS)
+    .eq("id", user.id)
+    .single();
 
   if (!profile) {
     redirect("/login");

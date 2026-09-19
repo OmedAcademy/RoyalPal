@@ -2,6 +2,7 @@ import { handle, requireApiUser, apiOk } from "@/lib/api/handler";
 import { createClient } from "@/lib/supabase/server";
 import { unreadMessageCount } from "@/lib/messaging/service";
 import { NotificationService } from "@/lib/notifications/service";
+import { TUTOR_PROFILE_CLIENT_COLUMNS } from "@/lib/supabase/columns";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +19,11 @@ export async function GET() {
     const supabase = await createClient();
     const [roleProfile, unreadMessages, unreadNotifications] = await Promise.all([
       auth.profile.role === "tutor"
-        ? supabase.from("tutor_profiles").select("*").eq("id", auth.profile.id).maybeSingle()
+        ? supabase
+            .from("tutor_profiles")
+            .select(TUTOR_PROFILE_CLIENT_COLUMNS)
+            .eq("id", auth.profile.id)
+            .maybeSingle()
         : supabase.from("student_profiles").select("*").eq("id", auth.profile.id).maybeSingle(),
       unreadMessageCount(auth.profile.id),
       NotificationService.unreadCount(),

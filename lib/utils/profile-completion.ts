@@ -1,4 +1,4 @@
-import type { Profile, StudentProfile, TutorProfile } from "@/types/database";
+import type { Profile, StudentProfile, TutorProfileClient } from "@/types/database";
 
 function isFilled(value: unknown): boolean {
   if (value === null || value === undefined) return false;
@@ -33,7 +33,7 @@ export function computeStudentProfileCompletion(
 
 export function computeTutorProfileCompletion(
   profile: Profile,
-  tutorProfile: TutorProfile | null,
+  tutorProfile: TutorProfileClient | null,
 ): number {
   if (!tutorProfile) return 0;
 

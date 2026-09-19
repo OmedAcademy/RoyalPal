@@ -9,7 +9,7 @@ import { CheckboxGroup } from "@/components/ui/CheckboxGroup";
 import { COUNTRY_SELECT_OPTIONS } from "@/lib/constants/countries";
 import { LANGUAGE_NAMES } from "@/lib/constants/languages";
 import { SPECIALIZATIONS } from "@/lib/constants/profile-options";
-import type { Profile, Subject, TutorProfile } from "@/types/database";
+import type { Profile, Subject, TutorProfileClient } from "@/types/database";
 
 const initialState: ProfileActionState = {};
 
@@ -26,7 +26,7 @@ export function TutorProfileForm({
   selectedSubjectIds,
 }: {
   profile: Profile;
-  tutorProfile: TutorProfile | null;
+  tutorProfile: TutorProfileClient | null;
   timezones: string[];
   subjects: Subject[];
   selectedSubjectIds: number[];

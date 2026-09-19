@@ -269,47 +269,75 @@ describe("legitimate tutor profile saves still work", () => {
       trial_price_cents = excluded.trial_price_cents,
       availability_note = excluded.availability_note,
       video_url = excluded.video_url
-    returning headline, hourly_rate_cents, verification_status, stripe_account_id,
-              stripe_charges_enabled, stripe_payouts_enabled, platform_fee_bps,
-              avg_rating, total_reviews`;
+    returning headline, hourly_rate_cents, verification_status,
+              stripe_charges_enabled, avg_rating, total_reviews`;
+
+  // The platform columns the tutor must not disturb are no longer in that
+  // RETURNING clause: migration 0041 revokes SELECT on them from
+  // `authenticated`, so naming one would fail the whole statement before the
+  // lock under test ever ran. The assertion they carried is stronger read
+  // back as a trusted reader — it checks the committed row rather than what
+  // the writer was handed.
+  // Runs the tutor's own upsert, then — still inside the SAME transaction,
+  // because the harness rolls each one back — drops to the session role to
+  // read the columns a client may no longer see. `reset role` is what makes
+  // the committed-but-uncommitted row readable here.
+  const upsertThenInspect = async (tutorId: string, headline: string) => {
+    let returned: unknown[] = [];
+    let platform: Record<string, unknown> = {};
+    await as(db, user(tutorId), async () => {
+      returned = (await db.query(UPSERT_TUTOR_PROFILE, [tutorId, headline])).rows;
+      await db.exec("reset role");
+      platform = (
+        await db.query<Record<string, unknown>>(
+          `select stripe_account_id, stripe_payouts_enabled, platform_fee_bps
+             from public.tutor_profiles where id = $1`,
+          [tutorId],
+        )
+      ).rows[0];
+    });
+    return { returned, platform };
+  };
 
   it("lets a new tutor create their profile with the upsert the app sends", async () => {
-    const rows = await runAs(db, user(tutorNew), UPSERT_TUTOR_PROFILE, [tutorNew, "First save"]);
+    const { returned: rows, platform } = await upsertThenInspect(tutorNew, "First save");
 
     expect(rows).toEqual([
       {
         headline: "First save",
         hourly_rate_cents: 4500,
         verification_status: "pending",
-        stripe_account_id: null,
         stripe_charges_enabled: false,
-        stripe_payouts_enabled: false,
-        platform_fee_bps: null,
         avg_rating: null,
         total_reviews: 0,
       },
     ]);
+    expect(platform).toEqual({
+      stripe_account_id: null,
+      stripe_payouts_enabled: false,
+      platform_fee_bps: null,
+    });
   });
 
   it("lets an approved, connected tutor re-save without disturbing any platform column", async () => {
-    const rows = await runAs(db, user(tutorConnected), UPSERT_TUTOR_PROFILE, [
-      tutorConnected,
-      "Edited headline",
-    ]);
+    const { returned: rows, platform } = await upsertThenInspect(tutorConnected, "Edited headline");
 
     expect(rows).toEqual([
       {
         headline: "Edited headline",
         hourly_rate_cents: 4500,
         verification_status: "approved",
-        stripe_account_id: "acct_connected_tutor",
         stripe_charges_enabled: true,
-        stripe_payouts_enabled: true,
-        platform_fee_bps: 1500,
         avg_rating: null,
         total_reviews: 0,
       },
     ]);
+    // Untouched by the tutor's own save — the point of migration 0028.
+    expect(platform).toEqual({
+      stripe_account_id: "acct_connected_tutor",
+      stripe_payouts_enabled: true,
+      platform_fee_bps: 1500,
+    });
   });
 
   it("lets a tutor change their own prices", async () => {
@@ -357,13 +385,35 @@ describe("trusted writers are unaffected", () => {
   });
 
   it("lets an admin set a tutor's commission rate", async () => {
-    const rows = await runAs(
-      db,
-      user(admin),
-      "update public.tutor_profiles set platform_fee_bps = 800 where id = $1 returning platform_fee_bps",
-      [tutorPending],
-    );
-    expect(rows).toEqual([{ platform_fee_bps: 800 }]);
+    // Written, then read back after dropping to the session role: 0041
+    // withholds platform_fee_bps from `authenticated`, and an admin's own
+    // PostgREST session IS the `authenticated` role — "admin" is a row in
+    // profiles, not a database role. The admin surface reaches this column
+    // through the service role.
+    let rows: unknown[] = [];
+    let stored: number | null = null;
+    await as(db, user(admin), async () => {
+      rows = (
+        await db.query(
+          "update public.tutor_profiles set platform_fee_bps = 800 where id = $1 returning id",
+          [tutorPending],
+        )
+      ).rows;
+      await db.exec("reset role");
+      stored = (
+        await db.query<{ platform_fee_bps: number }>(
+          "select platform_fee_bps from public.tutor_profiles where id = $1",
+          [tutorPending],
+        )
+      ).rows[0].platform_fee_bps;
+    });
+    expect(stored).toBe(800);
+    // Written, then read back as a trusted reader: 0041 withholds
+    // platform_fee_bps from `authenticated`, and an admin's own PostgREST
+    // session is still the `authenticated` role — "admin" is a row in
+    // profiles, not a database role. The admin console reaches this column
+    // through the service role.
+    expect(rows).toHaveLength(1);
   });
 
   it("does not let an admin's own session forge Stripe state either", async () => {

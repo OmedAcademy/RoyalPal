@@ -3,13 +3,18 @@ import { createClient } from "@/lib/supabase/server";
 import { AvatarUpload } from "@/components/profile/AvatarUpload";
 import { TutorProfileForm } from "@/components/profile/TutorProfileForm";
 import { getTimezones } from "@/lib/constants/timezones";
+import { TUTOR_PROFILE_CLIENT_COLUMNS } from "@/lib/supabase/columns";
 
 export default async function TutorProfilePage() {
   const profile = await requireProfile(["tutor"]);
   const supabase = await createClient();
 
   const [{ data: tutorProfile }, { data: subjects }, { data: tutorSubjects }] = await Promise.all([
-    supabase.from("tutor_profiles").select("*").eq("id", profile.id).maybeSingle(),
+    supabase
+      .from("tutor_profiles")
+      .select(TUTOR_PROFILE_CLIENT_COLUMNS)
+      .eq("id", profile.id)
+      .maybeSingle(),
     supabase.from("subjects").select("*").order("category").order("name"),
     supabase.from("tutor_subjects").select("subject_id").eq("tutor_id", profile.id),
   ]);

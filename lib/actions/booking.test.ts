@@ -228,7 +228,28 @@ describe("createBooking — trust boundary (migration 0029)", () => {
   });
 
   it("inserts the booking through the service role, never the caller's session", async () => {
-    adminFake = createFakeSupabase({ bookings: [], payments: [] });
+    // The admin fake now needs the tutor's rows too: migration 0041 withholds
+    // platform_fee_bps and stripe_account_id from `authenticated`, so the
+    // commission lookup and the destination-charge lookup moved to the service
+    // role alongside the insert. bookings/payments stay empty so the
+    // assertions below still prove where the WRITE happened.
+    adminFake = createFakeSupabase({
+      tutor_profiles: [
+        {
+          id: TUTOR,
+          hourly_rate_cents: 5000,
+          trial_price_cents: 2000,
+          currency: "usd",
+          verification_status: "approved",
+          stripe_charges_enabled: true,
+          platform_fee_bps: null,
+        },
+      ],
+      profiles: [{ id: TUTOR, full_name: "Tutor", role: "tutor", timezone: "Europe/Dublin" }],
+      subjects: [{ id: 1, name: "English" }],
+      bookings: [],
+      payments: [],
+    });
 
     await captureRedirect(() => createBooking({}, form()));
 

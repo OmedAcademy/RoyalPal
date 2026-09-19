@@ -168,7 +168,12 @@ describe("startTutorOnboarding — account creation", () => {
 
     await captureRedirect(() => startTutorOnboarding({}, new FormData()));
 
-    expect(createAdminClient).toHaveBeenCalledTimes(1);
+    // Twice, not once: migration 0041 withholds stripe_account_id from
+    // `authenticated` as well, so the READ that checks for an existing account
+    // now goes through the service role alongside the write. The two
+    // assertions below are the ones that carry the meaning — which store
+    // actually changed, and which did not.
+    expect(createAdminClient).toHaveBeenCalledTimes(2);
     expect(adminFake.db.tutor_profiles[0].stripe_account_id).toBe("acct_new");
     expect(fake.db.tutor_profiles[0].stripe_account_id).toBeNull();
   });
