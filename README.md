@@ -8,6 +8,9 @@ RoyalPal runs on the **web, iOS and Android** from one backend.
 
 ---
 
+> **Where the project actually stands** — what is built, what is not, and
+> what a launch still needs: [`docs/STATUS.md`](docs/STATUS.md).
+
 ## Status, stated plainly
 
 > **Payments are intentionally unconfigured.** Stripe Connect Express is
