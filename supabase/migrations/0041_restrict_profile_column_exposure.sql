@@ -52,6 +52,20 @@
 --     an old policy already exposed in full. A view would not have prevented
 --     that; this does.
 --
+-- DEPLOY ORDER: THE APPLICATION CODE MUST BE LIVE FIRST
+-- This migration REMOVES a permission the previously-deployed code relies on,
+-- which puts it in the same class as 0028, 0029, 0030 and 0039 — not with the
+-- additive ones. Before commit bfcd54c, requireProfile, requireProfileAllowing-
+-- Suspended and requireApiUser each ran `from("profiles").select("*")`, and
+-- `select *` fails outright when the role lacks a column. Verified: that exact
+-- statement returns "permission denied for table profiles" against a database
+-- with this migration applied.
+--
+-- Applying it before its code is live therefore breaks EVERY signed-in page
+-- (MemberShell calls requireProfile on all of them) and EVERY /api/v1 route
+-- at once. Of the five code-first migrations this is the most damaging to get
+-- wrong. See docs/deploy-0028-0041.md.
+--
 -- WHAT IS NOT CHANGED
 -- No policy is dropped, added or altered. No table loses RLS. INSERT and
 -- UPDATE privileges are untouched, so the write path and the column-lock

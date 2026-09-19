@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
   createTestDb,
+  as,
   runAs,
   createUser,
   createTutorProfile,
@@ -317,6 +318,65 @@ describe("column exposure", () => {
           [tutor],
         ),
       ).rejects.toThrow(/permission denied/i);
+    });
+  });
+
+  // SECURITY INVOKER trigger functions -----------------------------------------
+  describe("the SECURITY INVOKER functions that touch withheld columns", () => {
+    /**
+     * protect_tutor_platform_columns (0028) and protect_profile_date_of_birth
+     * (0036) both run as the CALLING role and both read columns that 0041
+     * withholds from `authenticated`.
+     *
+     * They keep working because a trigger function reads NEW and OLD as
+     * in-memory records rather than selecting from the table, so column
+     * privileges never enter into it. That is a claim worth executing rather
+     * than believing: if it were wrong, every tutor profile save and every
+     * profile update would fail with "permission denied for column" the moment
+     * 0041 landed, and the failure would look like a broken product rather
+     * than a permissions change.
+     */
+    it("protect_tutor_platform_columns still fires for an authenticated writer", async () => {
+      // A legitimate edit: the trigger reads NEW.stripe_account_id et al to
+      // compare them against OLD, and must allow this through.
+      await as(db, user(tutor), async () => {
+        const { rows } = await db.query(
+          `update public.tutor_profiles set headline = 'Edited by the tutor'
+            where id = $1 returning headline`,
+          [tutor],
+        );
+        expect(rows).toEqual([{ headline: "Edited by the tutor" }]);
+      });
+    });
+
+    it("protect_tutor_platform_columns still REFUSES a forged platform column", async () => {
+      // And the refusal it exists for still happens — proving the trigger ran
+      // rather than being skipped.
+      await as(db, user(tutor), async () => {
+        await expect(
+          db.query(`update public.tutor_profiles set platform_fee_bps = 1 where id = $1`, [tutor]),
+        ).rejects.toThrow(/platform-controlled|only|denied/i);
+      });
+    });
+
+    it("protect_profile_date_of_birth still fires for an authenticated writer", async () => {
+      await as(db, user(student), async () => {
+        const { rows } = await db.query(
+          `update public.profiles set full_name = 'Renamed' where id = $1 returning full_name`,
+          [student],
+        );
+        expect(rows).toEqual([{ full_name: "Renamed" }]);
+      });
+    });
+
+    it("protect_profile_date_of_birth still REFUSES a rewrite of a set date_of_birth", async () => {
+      await as(db, user(student), async () => {
+        await expect(
+          db.query(`update public.profiles set date_of_birth = '2000-01-01' where id = $1`, [
+            student,
+          ]),
+        ).rejects.toThrow(/date of birth|denied|once/i);
+      });
     });
   });
 
