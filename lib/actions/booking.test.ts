@@ -56,6 +56,12 @@ vi.mock("@/lib/stripe/client", () => ({ isStripeConfigured: () => stripeConfigur
 vi.mock("@/lib/stripe/checkout", () => ({
   createBookingCheckoutSession: (...a: unknown[]) => createCheckout(...a),
 }));
+// Mocked so the test can assert WHAT was sent to Stripe and, more
+// importantly, what was NOT written to our own payments row as a result.
+const refundPayment = vi.fn();
+vi.mock("@/lib/stripe/refunds", () => ({
+  refundBookingPayment: (...a: unknown[]) => refundPayment(...a),
+}));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("next/navigation", () => ({
   redirect: (url: string) => {
@@ -150,6 +156,7 @@ beforeEach(() => {
     url: "https://checkout.test/x",
     payment_intent: null,
   });
+  refundPayment.mockReset();
 });
 
 describe("createBooking — authorization", () => {
@@ -458,13 +465,35 @@ describe("createBooking — Connect payout gate (Milestone 2.6)", () => {
 });
 
 describe("cancelBooking", () => {
-  beforeEach(() => {
+  /** Hours from now, as the ISO string a booking row would hold. */
+  const startingIn = (hours: number) => new Date(Date.now() + hours * 3_600_000).toISOString();
+
+  function pushBooking(over: Record<string, unknown> = {}) {
     fake.db.bookings.push({
       id: BOOKING,
       student_id: STUDENT,
       tutor_id: TUTOR,
       status: "confirmed",
+      // Both matter to the policy, so a fixture without them was testing the
+      // NaN path rather than any rule anyone wrote.
+      start_at: startingIn(72),
+      price_cents: 5000,
+      ...over,
     });
+  }
+
+  /** A succeeded payment, which is what makes a refund possible at all. */
+  function pushSucceededPayment() {
+    fake.db.payments.push({
+      booking_id: BOOKING,
+      stripe_payment_intent_id: "pi_123",
+      status: "succeeded",
+      amount_cents: 5000,
+    });
+  }
+
+  beforeEach(() => {
+    pushBooking();
   });
 
   it("requires authentication", async () => {
@@ -482,7 +511,7 @@ describe("cancelBooking", () => {
 
     const res = await cancelBooking({}, fd);
 
-    expect(res.message).toBe("Booking cancelled");
+    expect(res.message).toMatch(/cancelled/i);
     expect(fake.db.bookings[0].status).toBe("cancelled");
     expect(emit).toHaveBeenCalledTimes(1);
     expect(emit.mock.calls[0][0]).toMatchObject({ userId: TUTOR, type: "booking_cancelled" });
@@ -494,6 +523,120 @@ describe("cancelBooking", () => {
 
     expect((await cancelBooking({}, fd)).error).toBeTruthy();
     expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("records which policy rule fired and what it owes", async () => {
+    const fd = new FormData();
+    fd.set("bookingId", BOOKING);
+
+    await cancelBooking({}, fd);
+
+    // 72 hours out, cancelled by the student: full refund owed.
+    expect(fake.db.bookings[0]).toMatchObject({
+      cancellation_policy: "student_outside_window_full_refund",
+      refund_owed_cents: 5000,
+      cancelled_by: STUDENT,
+    });
+    expect(fake.db.bookings[0].cancelled_at).toBeTruthy();
+  });
+
+  it("owes nothing when the student cancels inside the window", async () => {
+    fake.db.bookings.length = 0;
+    pushBooking({ start_at: startingIn(2) });
+
+    const fd = new FormData();
+    fd.set("bookingId", BOOKING);
+    const res = await cancelBooking({}, fd);
+
+    expect(fake.db.bookings[0]).toMatchObject({
+      cancellation_policy: "student_inside_window_no_refund",
+      refund_owed_cents: 0,
+    });
+    // No refund owed, so nothing about money is promised.
+    expect(res.message).toBe("Lesson cancelled.");
+    expect(refundPayment).not.toHaveBeenCalled();
+  });
+
+  it("owes a full refund whenever the TUTOR cancels, however late", async () => {
+    seed({ user: TUTOR });
+    fake.db.bookings.length = 0;
+    pushBooking({ start_at: startingIn(1) });
+
+    const fd = new FormData();
+    fd.set("bookingId", BOOKING);
+    await cancelBooking({}, fd);
+
+    expect(fake.db.bookings[0]).toMatchObject({
+      cancellation_policy: "tutor_cancelled_full_refund",
+      refund_owed_cents: 5000,
+    });
+  });
+
+  it("cannot be talked into the tutor's outcome by the form", async () => {
+    // The student is the caller; cancelledBy is resolved from the booking, so
+    // a hostile field cannot buy a refund the window would refuse.
+    fake.db.bookings.length = 0;
+    pushBooking({ start_at: startingIn(2) });
+
+    const fd = new FormData();
+    fd.set("bookingId", BOOKING);
+    fd.set("cancelledBy", "tutor");
+    await cancelBooking({}, fd);
+
+    expect(fake.db.bookings[0].refund_owed_cents).toBe(0);
+  });
+
+  it("asks Stripe for the refund, and records only that it ASKED", async () => {
+    pushSucceededPayment();
+    refundPayment.mockResolvedValue({ id: "re_123" });
+
+    const fd = new FormData();
+    fd.set("bookingId", BOOKING);
+    const res = await cancelBooking({}, fd);
+
+    expect(refundPayment).toHaveBeenCalledWith({ paymentIntentId: "pi_123" });
+    expect(fake.db.payments[0]).toMatchObject({
+      stripe_refund_id: "re_123",
+      refund_requested_by: STUDENT,
+    });
+    expect(fake.db.payments[0].refund_requested_at).toBeTruthy();
+    // The one that matters: asking is not the same as it having happened, and
+    // only Stripe's charge.refunded event may write this field.
+    expect(fake.db.payments[0].status).toBe("succeeded");
+    expect(res.message).toMatch(/on its way/i);
+  });
+
+  it("still cancels, and says a refund is outstanding, when Stripe is unavailable", async () => {
+    pushSucceededPayment();
+    refundPayment.mockRejectedValue(new Error("stripe down"));
+
+    const fd = new FormData();
+    fd.set("bookingId", BOOKING);
+    const res = await cancelBooking({}, fd);
+
+    // The lesson is cancelled either way — a payment problem must not trap a
+    // student in a lesson they cancelled.
+    expect(fake.db.bookings[0].status).toBe("cancelled");
+    // And the obligation is still recorded, so it is not lost.
+    expect(fake.db.bookings[0].refund_owed_cents).toBe(5000);
+    expect(res.message).toMatch(/team has been notified/i);
+    expect(fake.db.payments[0].status).toBe("succeeded");
+  });
+
+  it("does not attempt a refund when no payment ever succeeded", async () => {
+    fake.db.payments.push({
+      booking_id: BOOKING,
+      stripe_payment_intent_id: "pi_123",
+      status: "failed",
+      amount_cents: 5000,
+    });
+
+    const fd = new FormData();
+    fd.set("bookingId", BOOKING);
+    const res = await cancelBooking({}, fd);
+
+    expect(refundPayment).not.toHaveBeenCalled();
+    expect(res.message).toBe("Lesson cancelled.");
   });
 });
 
@@ -640,12 +783,26 @@ describe("graceful degradation when Stripe is not configured", () => {
     expect(createCheckout).not.toHaveBeenCalled();
   });
 
-  it("still allows cancelling — nothing about it touches Stripe", async () => {
+  // CONTRACT CHANGE: this test used to be called "nothing about it touches
+  // Stripe", which stopped being true when cancellation gained a refund
+  // policy. A cancellation that owes money now DOES reach for Stripe. The
+  // thing worth pinning is not that it avoids Stripe, but that an
+  // unconfigured Stripe never traps a student in a lesson they cancelled, and
+  // never silently loses what they are owed.
+  it("still cancels when Stripe is unconfigured, and does not lose the refund owed", async () => {
     fake.db.bookings.push({
       id: BOOKING,
       student_id: STUDENT,
       tutor_id: TUTOR,
       status: "confirmed",
+      start_at: new Date(Date.now() + 72 * 3_600_000).toISOString(),
+      price_cents: 5000,
+    });
+    fake.db.payments.push({
+      booking_id: BOOKING,
+      stripe_payment_intent_id: "pi_123",
+      status: "succeeded",
+      amount_cents: 5000,
     });
     stripeConfigured = false;
     const fd = new FormData();
@@ -653,6 +810,11 @@ describe("graceful degradation when Stripe is not configured", () => {
 
     const res = await cancelBooking({}, fd);
 
-    expect(res.message).toBe("Booking cancelled");
+    expect(fake.db.bookings[0].status).toBe("cancelled");
+    // The obligation survives the outage, on the booking row, where the admin
+    // refund queue can find it.
+    expect(fake.db.bookings[0].refund_owed_cents).toBe(5000);
+    expect(refundPayment).not.toHaveBeenCalled();
+    expect(res.message).toMatch(/team has been notified/i);
   });
 });

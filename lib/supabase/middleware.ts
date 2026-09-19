@@ -23,6 +23,17 @@ const PROTECTED_PREFIXES = {
 const AUTHENTICATED_PREFIXES = ["/messages", "/settings", "/support"] as const;
 
 /**
+ * The one authenticated area a SUSPENDED account may still reach.
+ *
+ * Suspension cuts off everything else, and should — but appealing the
+ * suspension is the single thing a suspended person legitimately needs to do,
+ * and every other route in the product tells them to "contact support". A
+ * suspension that also blocks the appeal route is a dead end with our own
+ * error message pointing into it.
+ */
+const SUSPENDED_ALLOWED_PREFIXES = ["/support"] as const;
+
+/**
  * Refreshes the Supabase session cookie on every request (required since
  * Server Components can't write cookies themselves) and gates role-scoped
  * route prefixes. This is defense-in-depth's first layer; each protected
@@ -83,8 +94,12 @@ export async function updateSession(request: NextRequest) {
       return NextResponse.redirect(new URL("/login", request.url));
     }
 
-    // Suspended accounts are cut off at the edge, before any page renders.
-    if (profile.status === "suspended") {
+    // Suspended accounts are cut off at the edge, before any page renders —
+    // except on the appeal route above.
+    const appealRoute = SUSPENDED_ALLOWED_PREFIXES.some(
+      (prefix) => path === prefix || path.startsWith(`${prefix}/`),
+    );
+    if (profile.status === "suspended" && !appealRoute) {
       return NextResponse.redirect(new URL("/suspended", request.url));
     }
 

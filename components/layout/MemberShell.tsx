@@ -1,4 +1,4 @@
-import { requireProfile } from "@/lib/supabase/queries";
+import { requireProfile, requireProfileAllowingSuspended } from "@/lib/supabase/queries";
 import { NotificationService } from "@/lib/notifications/service";
 import { unreadMessageCount } from "@/lib/messaging/service";
 import { navigationFor } from "@/lib/navigation";
@@ -19,13 +19,19 @@ import type { UserRole } from "@/types/database";
 export async function MemberShell({
   allowedRoles,
   areaLabel,
+  allowSuspended = false,
   children,
 }: {
   allowedRoles: UserRole[];
   areaLabel?: string;
+  /** Only /support sets this. See requireProfileAllowingSuspended for why a
+   * suspended account must still be able to open that one area. */
+  allowSuspended?: boolean;
   children: React.ReactNode;
 }) {
-  const profile = await requireProfile(allowedRoles);
+  const profile = allowSuspended
+    ? await requireProfileAllowingSuspended(allowedRoles)
+    : await requireProfile(allowedRoles);
 
   const [notifications, unreadNotifications, unreadMessages] = await Promise.all([
     NotificationService.list(),

@@ -19,6 +19,8 @@ import { MeetingService } from "@/lib/meet/service";
 import { ensureConversationForBooking } from "@/lib/messaging/service";
 import { logger } from "@/lib/observability/logger";
 import { platformFeeCents, resolvePlatformFeeBps } from "@/lib/pricing/commission";
+import { resolveCancellation, isCancellable } from "@/lib/booking/cancellation-policy";
+import { refundBookingPayment } from "@/lib/stripe/refunds";
 import type { Database } from "@/types/database";
 
 export type BookingActionState = {
@@ -466,7 +468,7 @@ export async function cancelBooking(
   // it, any signed-in user could cancel any booking by guessing its id.
   const { data: booking } = await supabase
     .from("bookings")
-    .select("student_id, tutor_id, status")
+    .select("student_id, tutor_id, status, start_at, price_cents")
     .eq("id", parsed.data.bookingId)
     .maybeSingle();
 
@@ -479,9 +481,20 @@ export async function cancelBooking(
   // The same states the Cancel button is rendered for. The status trigger
   // would refuse anything else anyway, but with a database message rather than
   // one worth showing a student.
-  if (booking.status !== "pending_payment" && booking.status !== "confirmed") {
+  if (!isCancellable(booking.status)) {
     return { error: "This booking can no longer be cancelled." };
   }
+
+  // Who is cancelling changes the outcome, so it is resolved from the booking
+  // rather than taken from the form: a student POSTing cancelledBy=tutor would
+  // otherwise buy themselves a full refund inside the window.
+  const cancelledBy = booking.student_id === user.id ? "student" : "tutor";
+  const outcome = resolveCancellation({
+    status: booking.status,
+    startAt: new Date(booking.start_at),
+    pricePaidCents: booking.price_cents,
+    cancelledBy,
+  });
 
   // Guarded by `.in("status", ...)`: between the read above and this write the
   // payment webhook can confirm the booking or the expiry sweep can cancel it.
@@ -489,7 +502,16 @@ export async function cancelBooking(
   // a value we read a moment ago.
   const { data: cancelled, error } = await createAdminClient()
     .from("bookings")
-    .update({ status: "cancelled", cancellation_reason: parsed.data.reason })
+    .update({
+      status: "cancelled",
+      cancellation_reason: parsed.data.reason,
+      cancelled_at: new Date().toISOString(),
+      cancelled_by: user.id,
+      // The rule that fired, by name. The policy WILL change, and a lesson
+      // cancelled under the old one has to stay explainable under the new one.
+      cancellation_policy: outcome.policy,
+      refund_owed_cents: outcome.refundOwedCents,
+    })
     .eq("id", parsed.data.bookingId)
     .in("status", ["pending_payment", "confirmed"])
     .select("student_id, tutor_id")
@@ -502,6 +524,18 @@ export async function cancelBooking(
   if (!cancelled) {
     return { error: "This booking can no longer be cancelled." };
   }
+
+  // Ask Stripe for the refund the policy says is owed — and record only that
+  // we ASKED. payments.status is written to 'refunded' in exactly one place,
+  // handleChargeRefunded, from Stripe's own charge.refunded event. Nothing
+  // here may shortcut that, because the difference between "we requested a
+  // refund" and "the money went back" is the difference between a true
+  // statement and a false one.
+  const refundResult = await requestPolicyRefund({
+    bookingId: parsed.data.bookingId,
+    refundOwedCents: outcome.refundOwedCents,
+    requestedBy: user.id,
+  });
 
   // Tear down the live classroom so the Meet room is invalidated and both
   // parties' calendars are updated. Best-effort: the booking is already
@@ -521,5 +555,82 @@ export async function cancelBooking(
   revalidatePath("/student/bookings");
   revalidatePath("/tutor/bookings");
 
-  return { message: "Booking cancelled" };
+  // The message tells the truth about the money, including when the truth is
+  // "we've asked and it isn't back yet".
+  return { message: cancellationMessage(outcome, refundResult) };
+}
+
+/**
+ * Requests the refund a cancellation earned, if any.
+ *
+ * Returns what actually happened rather than a boolean, because the three
+ * outcomes need to be said differently to the person cancelling: nothing was
+ * owed, we asked Stripe and it accepted the request, or we could not ask at
+ * all. The third is not a failure to hide — a student owed money who is told
+ * "cancelled" and nothing else has no idea anything is outstanding.
+ */
+type RefundRequestResult = "not_owed" | "requested" | "unavailable";
+
+async function requestPolicyRefund(params: {
+  bookingId: string;
+  refundOwedCents: number;
+  requestedBy: string;
+}): Promise<RefundRequestResult> {
+  if (params.refundOwedCents <= 0) return "not_owed";
+
+  const admin = createAdminClient();
+  const { data: payment } = await admin
+    .from("payments")
+    .select("stripe_payment_intent_id, status")
+    .eq("booking_id", params.bookingId)
+    .maybeSingle();
+
+  // A refund is owed by policy but nothing ever succeeded through Stripe.
+  // Nothing to reverse, and saying "refunded" here would be a lie about money.
+  if (!payment || payment.status !== "succeeded" || !payment.stripe_payment_intent_id) {
+    return "not_owed";
+  }
+
+  if (!isStripeConfigured()) {
+    // The obligation is already recorded on the booking (refund_owed_cents),
+    // so it is visible in the admin refund queue and is not lost.
+    log.error("refund owed but Stripe is not configured", new Error("stripe_unconfigured"), {
+      bookingId: params.bookingId,
+    });
+    return "unavailable";
+  }
+
+  try {
+    const refund = await refundBookingPayment({
+      paymentIntentId: payment.stripe_payment_intent_id,
+    });
+    await admin
+      .from("payments")
+      .update({
+        refund_requested_at: new Date().toISOString(),
+        refund_requested_by: params.requestedBy,
+        stripe_refund_id: refund.id,
+      })
+      .eq("booking_id", params.bookingId);
+    return "requested";
+  } catch (err) {
+    log.error("refund request failed", err, { bookingId: params.bookingId });
+    return "unavailable";
+  }
+}
+
+function cancellationMessage(
+  outcome: { refundOwedCents: number },
+  refund: RefundRequestResult,
+): string {
+  if (outcome.refundOwedCents <= 0) {
+    return "Lesson cancelled.";
+  }
+  if (refund === "requested") {
+    return "Lesson cancelled. Your refund is on its way — it usually reaches your account within a few working days.";
+  }
+  if (refund === "unavailable") {
+    return "Lesson cancelled. A refund is due on this lesson and our team has been notified — we'll be in touch.";
+  }
+  return "Lesson cancelled.";
 }

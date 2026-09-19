@@ -48,6 +48,32 @@ export async function activeUserOrError(
  * to the caller's own dashboard if their role isn't in allowedRoles
  * (admin is always allowed through, matching the RLS is_admin() bypass).
  */
+/**
+ * Like requireProfile, but does NOT bounce a suspended account.
+ *
+ * Only the support routes use it. Suspension has to stop someone booking,
+ * messaging and reviewing; it must not stop them asking why they were
+ * suspended, or the product's own "contact support" copy points at a door
+ * that is locked from the inside.
+ */
+export async function requireProfileAllowingSuspended(allowedRoles: UserRole[]): Promise<Profile> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) redirect("/login");
+
+  const { data: profile } = await supabase.from("profiles").select("*").eq("id", user.id).single();
+  if (!profile) redirect("/login");
+
+  if (!allowedRoles.includes(profile.role) && profile.role !== "admin") {
+    redirect(roleToDashboardPath(profile.role));
+  }
+
+  return profile;
+}
+
 export async function requireProfile(allowedRoles: UserRole[]): Promise<Profile> {
   const supabase = await createClient();
   const {
