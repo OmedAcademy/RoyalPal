@@ -119,6 +119,31 @@ test.describe("the sign-in form", () => {
   });
 });
 
+test.describe("the authenticated surface is not reachable signed out", () => {
+  // Cheap, and it is the one assertion that would catch a middleware matcher
+  // edited into uselessness — the kind of change that looks harmless in a diff
+  // and exposes every admin page.
+  for (const path of [
+    "/admin",
+    "/admin/diagnostics",
+    "/admin/delivery",
+    "/admin/tutors",
+    "/student/dashboard",
+    "/tutor/dashboard",
+    "/messages",
+    "/settings",
+    "/support",
+  ]) {
+    test(`${path} redirects a signed-out visitor to sign in`, async ({ page }) => {
+      const response = await page.goto(path);
+      // Followed the redirect: we should be on the login page, not on the
+      // page we asked for.
+      await expect(page).toHaveURL(/\/login/);
+      expect(response?.status()).toBe(200);
+    });
+  }
+});
+
 test.describe("crawlability", () => {
   test("robots.txt points at the sitemap", async ({ request }) => {
     const response = await request.get("/robots.txt");

@@ -1,8 +1,12 @@
 # Applying migrations to production
 
-**Production is on `0027`. Migrations `0028`–`0039` are not applied.**
+**Production is on `0027`. Migrations `0028`–`0040` are not applied.**
 
-That is twelve migrations, and the order and the timing both matter — several
+> Verify rather than trust this line: **Admin → Diagnostics** probes the
+> connected database for the table or column each late migration introduces
+> and reports which are actually present.
+
+That is thirteen migrations, and the order and the timing both matter — several
 of them will break the live site if applied before the code that goes with
 them is deployed.
 
@@ -27,8 +31,31 @@ site — it breaks the feature outright, for everyone, immediately.
 signup form is live and **every new registration fails**, because
 `handle_new_user` raises on the missing field inside the `auth.users` insert.
 
+`0040` is a pure `revoke` and is additive in the same sense: it removes a
+privilege no application code has ever used. Apply it in the same batch — it
+closes an unauthenticated account-lockout path that arrives _with_ `0038`, so
+never apply `0038` without it.
+
 The other eight are additive — new tables, new columns, new policies — and
 cannot break code that does not know about them.
+
+### The window "deploy the code first" opens, and how to close it
+
+The rule above is about the four that REMOVE a permission. The additive eight
+run the other way: the deployed code **reads** the tables they create. Between
+the deploy and the migrations, messaging, support, push registration,
+rescheduling and the account-deletion screens all hit tables that do not exist
+yet, and each answers with an error rather than degrading.
+
+That is not a reason to reverse the order — reversing it breaks signup,
+booking, cancellation and tutor onboarding for everyone, which is worse. It is
+a reason to keep the window short and to know what it costs:
+
+- Apply the migrations immediately after the deploy is confirmed live, in one
+  sitting, not the next day.
+- Do it at the quietest hour you have.
+- Afterwards, open **Admin → Diagnostics**; it re-probes and will tell you if
+  any of them did not land.
 
 ---
 

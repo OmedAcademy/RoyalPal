@@ -120,12 +120,12 @@ export async function invokeAction<S extends { error?: string; message?: string 
     // difference between "English, Spanish" as two languages and as the name
     // of one.
     if (Array.isArray(value)) {
+      // An empty array appends nothing, which is what the receiving schemas
+      // want: every list-replacement action parses a missing field and an
+      // empty list to the same [], and both correctly mean "replace what is
+      // stored with nothing". An earlier draft marked the empty case with a
+      // sentinel field; nothing ever read it.
       for (const item of value) formData.append(key, String(item));
-      // An EMPTY array still has to be expressible: "the tutor removed their
-      // last availability row" and "the client did not mention availability"
-      // are different requests, and getAll() cannot tell them apart. The
-      // sentinel is read by the routes that accept list replacement.
-      if (value.length === 0) formData.set(`${key}__empty`, "1");
       continue;
     }
 

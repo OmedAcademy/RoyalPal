@@ -52,16 +52,18 @@ describe("invokeAction", () => {
     expect(formData.getAll("languages")).toEqual(["en", "es", "ku"]);
   });
 
-  it("marks an empty array, because getAll() cannot distinguish it from absent", async () => {
+  it("sends an empty array as no fields at all", async () => {
     const action = vi.fn(async (_prev: typeof initial, _formData: FormData) => ({}));
     await invokeAction(action, { dayOfWeek: [] }, initial);
 
     const formData = action.mock.calls[0][1];
+    // Which is what "the tutor removed their last availability row" has to
+    // mean: availabilityRulesSchema parses [] and replaces the stored
+    // template with nothing. Adding a marker field here would only invent a
+    // second way to say the same thing — an earlier draft did, and nothing
+    // ever read it.
     expect(formData.getAll("dayOfWeek")).toEqual([]);
-    // "the tutor deleted their last availability row" vs "availability was not
-    // part of this request" are different intentions and must stay tellable
-    // apart.
-    expect(formData.get("dayOfWeek__empty")).toBe("1");
+    expect([...formData.keys()]).toEqual([]);
   });
 
   it("extracts the destination from a thrown redirect carrying `url`", async () => {

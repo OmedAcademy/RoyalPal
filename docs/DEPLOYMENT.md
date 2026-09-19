@@ -115,6 +115,47 @@ review" rather than as anything resembling a cron problem.
 
 ---
 
+## Verifying a deploy
+
+**Admin → Diagnostics** (`/admin/diagnostics`) is the first page to open after
+any deploy or configuration change. It checks the running system rather than
+repeating what a document says:
+
+| Group          | Answers                                                                                                     |
+| -------------- | ----------------------------------------------------------------------------------------------------------- |
+| Database       | Can it be reached, how fast, and are there any subjects to book                                             |
+| Database       | Which of migrations `0028`–`0040` this database actually has, probed table by table                         |
+| Authentication | Are all three Supabase values present, and does each carry the role it should                               |
+| Authorization  | Does an admin account exist at all (admins cannot self-register)                                            |
+| Environment    | Is `NEXT_PUBLIC_APP_URL` absolute, non-localhost in production, and matching the origin serving the page    |
+| Scheduled jobs | Is `CRON_SECRET` set and long enough                                                                        |
+| Payments       | Stripe's state, including a live key on a non-production deployment, or a secret key with no webhook secret |
+| Delivery       | Email, push and in-app                                                                                      |
+| Lessons        | Google Meet, including the partially-configured case                                                        |
+| Storage        | Does the avatars bucket exist and is it public                                                              |
+| Public surface | The home page, all seven policy pages, robots.txt, sitemap.xml and `/api/v1/me`, fetched over HTTP          |
+
+Three states, and the distinction is the point:
+
+- **OK** — configured _and_ verified, not merely set.
+- **Not configured** — deliberately unavailable. Stripe with no keys is this,
+  because it is the documented state of the project.
+- **Needs attention** — broken or unsafe. A live Stripe key on a preview
+  deployment is this, even though every variable is present.
+
+A page that paints known gaps red trains its reader to ignore red.
+
+Two that are deliberately NOT yellow, because "unset" does not mean "off":
+
+- **`CRON_SECRET` unset is red.** Cron auth fails closed, so an unset secret is
+  three jobs returning 503 forever — lessons never complete and reviews become
+  impossible to leave.
+- **A Stripe secret key with no webhook secret is red.** Students would be
+  charged and no booking would ever be confirmed, because confirmation happens
+  on the webhook. Worse than having no Stripe at all.
+
+---
+
 ## Verifying delivery after a deploy
 
 **Admin → Delivery** (`/admin/delivery`) is the first thing to open after

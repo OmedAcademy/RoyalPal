@@ -59,6 +59,7 @@ export function navigationFor(role: UserRole, counts: { unreadMessages?: number 
     { href: "/admin/reviews", label: "Reviews", icon: "star" },
     { href: "/admin/support", label: "Support", icon: "life-ring", primary: true },
     { href: "/admin/delivery", label: "Delivery", icon: "bell" },
+    { href: "/admin/diagnostics", label: "Diagnostics", icon: "shield" },
     { href: "/admin/audit", label: "Audit", icon: "shield", primary: true },
   ];
 }
