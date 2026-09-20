@@ -27,6 +27,10 @@ export type NotificationType =
   | "lesson_reminder"
   | "booking_rescheduled"
   | "support_reply"
+  // Admin-facing. A ticket that left the queue has been replied to, or an
+  // urgent one has new activity. Deliberately in the `support` category,
+  // which is not switchable off.
+  | "support_ticket_activity"
   | "account_deletion_requested"
   | "account_deletion_cancelled"
   // Admin → Delivery only. Never emitted by business logic.
@@ -92,6 +96,7 @@ export const NOTIFICATION_META: Record<NotificationType, NotificationMeta> = {
   lesson_reminder: { category: "bookings", icon: "⏰" },
   booking_rescheduled: { category: "bookings", icon: "🔁" },
   support_reply: { category: "support", icon: "🎧" },
+  support_ticket_activity: { category: "support", icon: "🚩" },
   account_deletion_requested: { category: "account", icon: "⚠️" },
   account_deletion_cancelled: { category: "account", icon: "↩️" },
   delivery_test: { category: "system", icon: "🧪" },

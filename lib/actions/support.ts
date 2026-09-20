@@ -10,7 +10,11 @@ import {
   ticketReplySchema,
   updateTicketSchema,
 } from "@/lib/validations/support";
-import { notifyTicketReply, URGENT_CATEGORIES } from "@/lib/support/service";
+import {
+  notifyAdminsOfTicketActivity,
+  notifyTicketReply,
+  URGENT_CATEGORIES,
+} from "@/lib/support/service";
 import { consumeRateLimit, rateLimitMessage } from "@/lib/rate-limit/limiter";
 import { NotificationService } from "@/lib/notifications/service";
 import { logger } from "@/lib/observability/logger";
@@ -136,15 +140,55 @@ export async function replyToTicket(
     return { error: "That request is closed, so it can't take new replies." };
   }
 
-  // A reply from the requester moves a "waiting on you" ticket back into the
-  // queue. Anything else is the admin's call.
-  await createAdminClient()
+  const admin = createAdminClient();
+
+  const { data: ticket } = await admin
+    .from("support_tickets")
+    .select("id, subject, category")
+    .eq("id", parsed.data.ticketId)
+    .maybeSingle();
+
+  // A reply from the requester moves a ticket that had LEFT the queue back
+  // into it. `resolved` belongs in that set as much as `waiting_on_user` does:
+  // the requester saying "this is still happening" is the plainest possible
+  // statement that it was not resolved, and leaving the status alone hid the
+  // message from every view an admin looks at. `closed` is absent because the
+  // insert above cannot reach it — RLS refuses a message on a closed ticket,
+  // so reopening is an admin action, as it should be.
+  //
+  // Conditional in the statement rather than on a status read a moment
+  // earlier, so an admin picking the ticket up at the same instant is not
+  // overwritten.
+  const { data: reopened } = await admin
     .from("support_tickets")
     .update({ status: "open" })
     .eq("id", parsed.data.ticketId)
-    .eq("status", "waiting_on_user");
+    .in("status", ["waiting_on_user", "resolved"])
+    .select("id")
+    .maybeSingle();
+
+  if (ticket) {
+    const urgent = URGENT_CATEGORIES.includes(ticket.category);
+    // Urgent regardless of status: the queue sorts oldest-activity-first, so a
+    // reply on an already-open safeguarding thread moves it further down the
+    // list, not up it.
+    if (urgent || reopened) {
+      if (urgent) {
+        log.error("reply on an urgent support ticket", new Error("urgent_ticket_reply"), {
+          ticketId: ticket.id,
+          category: ticket.category,
+        });
+      }
+      await notifyAdminsOfTicketActivity({
+        ticketId: ticket.id,
+        subject: ticket.subject,
+        urgent,
+      });
+    }
+  }
 
   revalidatePath(`/support/${parsed.data.ticketId}`);
+  revalidatePath("/admin/support");
   return { message: "Reply sent." };
 }
 

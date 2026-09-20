@@ -234,6 +234,48 @@ export async function openTicketCount(): Promise<number> {
   return count ?? 0;
 }
 
+/**
+ * Tells every active admin that a ticket wants looking at again.
+ *
+ * Needed because a reply is not, by itself, a signal. RLS lets a message land
+ * on a `resolved` ticket, the admin queue lifts urgent tickets out but
+ * excludes `resolved` and `closed` from that lift, and the queue sorts by
+ * oldest activity — so touching `last_message_at` moves a ticket DOWN. Three
+ * reasonable decisions that compose into a safeguarding report nobody sees.
+ *
+ * Every admin rather than the assigned one: assignment is nullable by design,
+ * and the assigned admin may be the one on holiday.
+ */
+export async function notifyAdminsOfTicketActivity(params: {
+  ticketId: string;
+  subject: string;
+  urgent: boolean;
+}): Promise<void> {
+  const admin = createAdminClient();
+  const { data: admins } = await admin
+    .from("profiles")
+    .select("id")
+    .eq("role", "admin")
+    .eq("status", "active")
+    .limit(100);
+
+  if (!admins || admins.length === 0) return;
+
+  await NotificationService.emitMany(
+    admins.map((row) => ({
+      userId: row.id,
+      type: "support_ticket_activity" as const,
+      title: params.urgent
+        ? "New reply on an urgent support ticket"
+        : "A support ticket was reopened",
+      body: params.subject,
+      // The admin view, not the requester's — the link has to land somewhere
+      // the recipient can actually act.
+      data: { href: `/admin/support/${params.ticketId}` },
+    })),
+  );
+}
+
 export async function notifyTicketReply(params: {
   userId: string;
   ticketId: string;

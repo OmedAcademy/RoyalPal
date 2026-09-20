@@ -80,9 +80,9 @@ tutor calendar reports a fetch failure as "nobody can book you" (MOB-13).
 
 | #   | ID                                                           | Status   |
 | --- | ------------------------------------------------------------ | -------- |
-| 3   | MSG-1 threads load the oldest 500, newest invisible          | QUEUED   |
+| 3   | MSG-1 threads load the oldest 500, newest invisible          | **DONE** |
 | 4   | MSG-2 101st conversation and every new thread 404            | **DONE** |
-| 5   | SUP-4 reply to a resolved safeguarding ticket reaches nobody | QUEUED   |
+| 5   | SUP-4 reply to a resolved safeguarding ticket reaches nobody | **DONE** |
 | 6   | MOB-3 `/tutor/profile` collides with `tutor/[id]` → HTTP 500 | QUEUED   |
 | 7   | MOB-6 401 mid-session is a dead end                          | QUEUED   |
 | 8   | MOB-2 20 of 23 notification types deep-link nowhere          | QUEUED   |
@@ -158,6 +158,27 @@ SUP-5, MSG-5, REV-3, MOB-12, MOB-14, MOB-15, MOB-16, MOB-17. All QUEUED.
   API and mobile all carry prev/next.
 - **Proof:** `lib/messaging/service.test.ts`, 8 tests. Observed 7 failed → 8
   passed. `tests/db/messaging-authorization.test.ts` (14) still passes.
+- **Commit:** this one.
+
+### SUP-4 — a reply to a resolved ticket reaches an admin · P1
+
+- **Was wrong:** RLS blocks a message only on a `closed` ticket, so a reply
+  landed on a `resolved` one and then reached nobody. The ticket stayed
+  `resolved`; the admin queue's urgent lift explicitly excludes `resolved` and
+  `closed`; and the queue sorts oldest-activity-first, so touching
+  `last_message_at` moved the row DOWN. Three reasonable decisions composing
+  into a safeguarding report nobody sees.
+- **Changed:** `replyToTicket` now reopens on `.in("status",
+["waiting_on_user", "resolved"])` — conditional in the statement, so an admin
+  picking the ticket up at the same instant is not overwritten. `closed` is
+  absent because the insert cannot reach it. Added
+  `notifyAdminsOfTicketActivity()`: every ACTIVE admin gets a
+  `support_ticket_activity` notification deep-linking to `/admin/support/<id>`,
+  on a reopen or on any reply to an urgent category regardless of status.
+  The `support` category is not in `OPTIONAL_CATEGORIES`, so it cannot be
+  switched off.
+- **Proof:** `lib/actions/support.test.ts`, 8 tests. Observed 5 failed → 8
+  passed.
 - **Commit:** this one.
 
 ## NEEDS SHERKAM
