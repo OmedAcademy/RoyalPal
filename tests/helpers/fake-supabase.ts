@@ -20,7 +20,7 @@ export type Row = Record<string, unknown>;
 export type Tables = Record<string, Row[]>;
 export type DbError = { message: string; code?: string };
 
-type Result<T> = { data: T; error: DbError | null };
+type Result<T> = { data: T; error: DbError | null; count?: number };
 
 /** Test-controlled failure injection (e.g. simulating the double-booking
  * exclusion-constraint violation Postgres raises as 23P01). */
@@ -33,6 +33,8 @@ class Query implements PromiseLike<Result<Row[]>> {
   private nullFilters: [string, unknown][] = [];
   private lessThanFilters: [string, unknown][] = [];
   private rowRange: [number, number] | null = null;
+  private wantsCount = false;
+  private headOnly = false;
   // NOT named `single`: createFakeSupabase exposes a chainable `single()`
   // METHOD by Object.assign-ing it onto the instance, which would overwrite
   // a same-named boolean field and leave it permanently truthy — making
@@ -51,7 +53,12 @@ class Query implements PromiseLike<Result<Row[]>> {
     private uuidColumns: string[] = [],
   ) {}
 
-  select(): this {
+  /** `{ count: "exact" }` returns how many rows MATCHED, before any range or
+   * limit — which is the whole point of asking for it, and what makes
+   * "1-20 of 137" sayable. `head: true` asks for that number alone. */
+  select(_columns?: string, opts?: { count?: string; head?: boolean }): this {
+    if (opts?.count) this.wantsCount = true;
+    if (opts?.head) this.headOnly = true;
     return this;
   }
 
@@ -179,6 +186,7 @@ class Query implements PromiseLike<Result<Row[]>> {
 
     if (this.op === "select") {
       let found = this.rows.filter((r) => this.matches(r));
+      const matched = found.length;
 
       for (const [column, ascending] of [...this.sorts].reverse()) {
         found = [...found].sort((a, b) => {
@@ -196,9 +204,12 @@ class Query implements PromiseLike<Result<Row[]>> {
       if (this.rowRange !== null) found = found.slice(this.rowRange[0], this.rowRange[1] + 1);
       if (this.rowLimit !== null) found = found.slice(0, this.rowLimit);
 
+      const count = this.wantsCount ? matched : undefined;
+      if (this.headOnly) return { data: null, error: null, count };
+
       return this.wantsSingle
-        ? { data: found[0] ?? null, error: null }
-        : { data: found, error: null };
+        ? { data: found[0] ?? null, error: null, count }
+        : { data: found, error: null, count };
     }
 
     if (this.op === "update") {
@@ -290,8 +301,15 @@ export function createFakeSupabase(
         db[table] ??= [];
         const rows = db[table];
         return {
-          select: () =>
-            withSingle(new Query(rows, "select", undefined, undefined, control, uuidColumns)),
+          // Arguments forwarded, not discarded: `{ count: "exact" }` is the
+          // difference between "20 results" and "20 of 137".
+          select: (columns?: string, selectOpts?: { count?: string; head?: boolean }) =>
+            withSingle(
+              new Query(rows, "select", undefined, undefined, control, uuidColumns).select(
+                columns,
+                selectOpts,
+              ),
+            ),
           insert: (payload: Row) =>
             withSingle(new Query(rows, "insert", payload, undefined, control, uuidColumns)),
           update: (patch: Row) =>

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { requireProfile } from "@/lib/supabase/queries";
-import { getMyTutorReviews } from "@/lib/supabase/reviews";
+import { getMyTutorReviews, getTutorRatingSummary } from "@/lib/supabase/reviews";
+import { SearchPagination } from "@/components/tutor/SearchPagination";
 import { ReviewReplyForm } from "@/components/review/ReviewReplyForm";
 import { formatDate } from "@/lib/utils/format";
 
@@ -13,14 +14,25 @@ function reviewerLabel(fullName: string): string {
   return `${first}${lastInitial}`;
 }
 
-export default async function TutorReviewsPage() {
+export default async function TutorReviewsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
   const profile = await requireProfile(["tutor"]);
-  const reviews = await getMyTutorReviews(profile.id);
+  const { page: pageParam } = await searchParams;
+  const requestedPage = Number.parseInt(pageParam ?? "0", 10);
 
-  const average =
-    reviews.length > 0
-      ? (reviews.reduce((total, review) => total + review.rating, 0) / reviews.length).toFixed(1)
-      : null;
+  // The summary comes from tutor_profiles, not from the reviews on screen.
+  // Averaging the visible page and printing it as "your average" contradicted
+  // the number on this tutor's own public profile, and moved every time a
+  // review landed past the twentieth.
+  const [{ reviews, page, pageSize, total, hasMore }, summary] = await Promise.all([
+    getMyTutorReviews(profile.id, { page: Number.isNaN(requestedPage) ? 0 : requestedPage }),
+    getTutorRatingSummary(profile.id),
+  ]);
+
+  const average = summary.average === null ? null : summary.average.toFixed(1);
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
@@ -30,13 +42,13 @@ export default async function TutorReviewsPage() {
         </h1>
         <p className="text-muted mt-1 text-sm">
           {average
-            ? `${average} average from ${reviews.length} review${reviews.length === 1 ? "" : "s"}.`
+            ? `${average} average from ${summary.total} review${summary.total === 1 ? "" : "s"}.`
             : "Reviews from students you've taught will appear here."}{" "}
           You can reply once to each review.
         </p>
       </div>
 
-      {reviews.length === 0 ? (
+      {reviews.length === 0 && page === 0 ? (
         <div className="border-hairline bg-surface rounded-2xl border p-6">
           <p className="font-medium">No reviews yet.</p>
           <p className="text-muted mt-1 text-sm">
@@ -71,6 +83,14 @@ export default async function TutorReviewsPage() {
           </article>
         ))
       )}
+
+      <SearchPagination
+        page={page}
+        hasMore={hasMore}
+        total={total}
+        pageSize={pageSize}
+        label="Review pages"
+      />
     </div>
   );
 }

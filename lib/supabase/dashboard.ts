@@ -36,10 +36,11 @@ export async function getTutorDashboard(
   timezone: string,
   currency: string,
 ): Promise<TutorDashboard> {
-  const [bookings, recentReviews] = await Promise.all([
+  const [bookings, reviewPage] = await Promise.all([
     getBookingsFor(userId, "tutor"),
     getTutorReviews(userId),
   ]);
+  const recentReviews = reviewPage.reviews;
 
   const todayKey = zonedDayKey(new Date(), timezone);
   const net = (b: BookingWithParties) => b.price_cents - b.platform_fee_cents;

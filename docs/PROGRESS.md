@@ -90,8 +90,8 @@ tutor calendar reports a fetch failure as "nobody can book you" (MOB-13).
 
 ### P2 — validation, edge cases, performance, reliability, UX states
 
-**DONE:** SUP-2, SUP-7, MSG-3, MSG-4.
-**QUEUED:** REV-1, REV-2, MOB-7, MOB-8, MOB-9, MOB-10, MOB-11, MOB-13.
+**DONE:** SUP-2, SUP-7, MSG-3, MSG-4, REV-1, REV-2.
+**QUEUED:** MOB-7, MOB-8, MOB-9, MOB-10, MOB-11, MOB-13.
 **Cannot be fixed here:** SUP-6 — see "Needs Sherkam".
 
 ### P3 — polish
@@ -321,6 +321,43 @@ closed_reason)`: the preview and the activity timestamp are the trigger's to
 - **Note:** `unread_message_count` is allowlisted in
   `tests/db/function-grants.test.ts` with its reason. Full suite after this:
   51 files, 719 tests, all passing.
+
+### REV-1 — a refusal a student can act on · P2
+
+- **Was wrong:** the pre-check was weaker than the policy behind it. Migration
+  0042 requires a SUCCEEDED PAYMENT; the action checked only that the booking
+  existed and was completed. So the refusal arrived from RLS instead — and the
+  action returned `error.message` verbatim, putting "new row violates
+  row-level security policy for table reviews" under a review form.
+- **Changed:** check the payment, and say so in words. Everything the action
+  can anticipate is now answered by name; what is left is logged and answered
+  with one sentence. A pre-check weaker than its policy is not more
+  permissive — it just moves the refusal somewhere it cannot be explained.
+- **Proof:** `lib/actions/review.test.ts`, 5 tests. Observed 3 failed → 5
+  passed. One assertion was widened after the fix: it had been written against
+  guessed wording (`/paid/`) rather than the property (`/paid|payment/`).
+
+### REV-2 — the tutor's own average, and the right of reply · P2
+
+- **Was wrong:** the Reviews screen averaged the FIRST PAGE and printed it as
+  the tutor's average — contradicting the number on their own public profile,
+  and moving every time a review landed past the twentieth. Reviews 21+ were
+  not rendered at all, so the documented right of reply did not exist on them.
+- **Changed:** `getTutorReviews` is paged (`range` + exact count) and
+  `getTutorRatingSummary` reads `avg_rating`/`total_reviews` from
+  `tutor_profiles` — whose trigger (0035) excludes hidden reviews, the same set
+  the tutor can see, so the number and the list agree. The screen carries
+  prev/next; the public profile says "showing the N most recent of M"; the JSON
+  API keeps `reviews` and gains `reviewsTotal`.
+- **Proof:** `lib/supabase/reviews.test.ts`, 6 tests. Restoring `reviews.ts`
+  from HEAD → 6 failed; with the change → 6 passed.
+- **Honest limit:** the red state shows the replacement did not exist, not that
+  the old page arithmetic was wrong. That arithmetic lives in a server
+  component and cannot be unit-tested without a renderer; it is visible in the
+  diff, three lines of `reduce` over `reviews`.
+- **Note:** the fake client now models `{ count: "exact" }` and forwards
+  `select()` arguments, which it previously discarded. Full suite after this:
+  53 files, 730 tests, all passing.
 
 ## NEEDS SHERKAM
 

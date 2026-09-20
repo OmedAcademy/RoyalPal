@@ -5,6 +5,9 @@ import { createClient } from "@/lib/supabase/server";
 import { activeUserOrError } from "@/lib/supabase/queries";
 import { createReviewSchema, replyToReviewSchema } from "@/lib/validations/review";
 import { NotificationService } from "@/lib/notifications/service";
+import { logger } from "@/lib/observability/logger";
+
+const log = logger.child({ component: "review-action" });
 
 export type ReviewActionState = {
   error?: string;
@@ -55,6 +58,21 @@ export async function createReview(
     return { error: "You can review a lesson once it's completed" };
   }
 
+  // Migration 0042 requires a succeeded payment, and this check exists to say
+  // so in words. Without it the policy still refused — but as an RLS error,
+  // which the branch below used to hand to the page verbatim. A pre-check
+  // weaker than the policy behind it does not make anything more permissive;
+  // it just moves the refusal somewhere it cannot be explained.
+  const { data: payment } = await supabase
+    .from("payments")
+    .select("status")
+    .eq("booking_id", parsed.data.bookingId)
+    .maybeSingle();
+
+  if (payment?.status !== "succeeded") {
+    return { error: "You can review a lesson once its payment has gone through." };
+  }
+
   const { error } = await supabase.from("reviews").insert({
     booking_id: parsed.data.bookingId,
     student_id: user.id,
@@ -67,7 +85,14 @@ export async function createReview(
     if (error.code === UNIQUE_VIOLATION) {
       return { error: "You've already reviewed this lesson" };
     }
-    return { error: error.message };
+    // Never the database's words. Everything this action can anticipate is
+    // answered above; what is left is ours to investigate, not the student's
+    // to read under a review form.
+    log.error("failed to create review", error, {
+      bookingId: parsed.data.bookingId,
+      userId: user.id,
+    });
+    return { error: "We couldn't post your review. Please try again." };
   }
 
   // Notify the tutor (best-effort — never blocks the review).

@@ -40,6 +40,7 @@ export default async function TutorDetailPage({ params }: { params: Promise<{ id
     getTutorReviews(id),
     isFavorited(id),
   ]);
+  const { reviews: reviewList, total: reviewTotal, hasMore: moreReviews } = reviews;
 
   const initial = tutor.full_name.trim().charAt(0).toUpperCase() || "?";
 
@@ -172,12 +173,18 @@ export default async function TutorDetailPage({ params }: { params: Promise<{ id
             </span>
           )}
         </h2>
-        {reviews.length === 0 ? (
+        {moreReviews && (
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            Showing the {reviewList.length} most recent of {reviewTotal}.
+          </p>
+        )}
+
+        {reviewList.length === 0 ? (
           <p className="text-sm text-zinc-600 dark:text-zinc-400">
             No reviews yet — be the first after your lesson.
           </p>
         ) : (
-          reviews.map((review) => (
+          reviewList.map((review) => (
             <div
               key={review.id}
               className="flex flex-col gap-1 rounded-md border border-black/10 p-3 dark:border-white/10"

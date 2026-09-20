@@ -26,6 +26,14 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       isFavorited(id),
     ]);
 
-    return apiOk({ tutor, subjects: subjects ?? [], reviews, favorited });
+    // `reviews` keeps its shape for existing clients; the total is what makes
+    // "20 of 137" sayable instead of implying 20 is all there is.
+    return apiOk({
+      tutor,
+      subjects: subjects ?? [],
+      reviews: reviews.reviews,
+      reviewsTotal: reviews.total,
+      favorited,
+    });
   });
 }
