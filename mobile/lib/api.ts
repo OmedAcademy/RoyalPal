@@ -39,6 +39,8 @@ export class ApiError extends Error {
 async function request<T>(
   path: string,
   init: RequestInit & { timeoutMs?: number } = {},
+  /** Set on the one retry a refreshed token earns. Guards the recursion. */
+  retriedAfterRefresh = false,
 ): Promise<T> {
   if (!BASE_URL) {
     throw new ApiError("The app isn't configured to reach RoyalPal yet.", 0, "unconfigured");
@@ -69,6 +71,13 @@ async function request<T>(
     const payload = text ? (JSON.parse(text) as unknown) : null;
 
     if (!response.ok) {
+      // A 401 is about the session, not about this screen, so it is answered
+      // here rather than by each caller. Left to the callers it was answered
+      // by none of them: every screen rendered an error with a Retry that
+      // could never work, because the token it would retry with is the thing
+      // that is dead. The app never signed out and never routed anywhere.
+      if (response.status === 401) return await recoverFrom401<T>(path, init, retriedAfterRefresh);
+
       const body = payload as { error?: string; code?: string } | null;
       throw new ApiError(
         body?.error ?? "Something went wrong. Please try again.",
@@ -88,6 +97,32 @@ async function request<T>(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+/**
+ * The one way out of a 401.
+ *
+ * A forced refresh first, because an access token can expire between leaving
+ * the device and being validated, and signing someone out over that race would
+ * be its own bug. Exactly one retry: a second failure means the session is
+ * finished, not unlucky.
+ *
+ * Then signOut, which is what turns the dead end into a sign-in screen —
+ * AuthProvider listens for the auth state change and the router follows. It
+ * is the sign-out, not the thrown error, that recovers the app.
+ */
+async function recoverFrom401<T>(
+  path: string,
+  init: RequestInit & { timeoutMs?: number },
+  alreadyRetried: boolean,
+): Promise<T> {
+  if (!alreadyRetried) {
+    const { data } = await supabase.auth.refreshSession();
+    if (data?.session) return request<T>(path, init, true);
+  }
+
+  await supabase.auth.signOut();
+  throw new ApiError("Your session has ended. Please sign in again.", 401, "session_expired");
 }
 
 export const api = {

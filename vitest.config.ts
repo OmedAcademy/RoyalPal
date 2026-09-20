@@ -4,6 +4,11 @@ import { fileURLToPath } from "node:url";
 // Resolves the "@/..." path alias (mirrors tsconfig paths) so tests can
 // import application modules exactly as the app does, and stubs the
 // `server-only` guard so server modules are unit-testable.
+/**
+ * The WEB project. The Expo app is a second project with its own "@" alias —
+ * see vitest.workspace.ts — because the two resolve that alias to different
+ * roots and one config cannot hold both.
+ */
 export default defineConfig({
   resolve: {
     alias: {
@@ -13,14 +18,6 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: [
-      "lib/**/*.test.ts",
-      "app/**/*.test.ts",
-      "tests/**/*.test.ts",
-      // Dependency-free mobile modules. They import by relative path, never
-      // through "@", because that alias resolves to the WEB root here and to
-      // the mobile root inside the Expo project.
-      "mobile/lib/**/*.test.ts",
-    ],
+    include: ["lib/**/*.test.ts", "app/**/*.test.ts", "tests/**/*.test.ts"],
   },
 });

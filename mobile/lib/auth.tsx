@@ -54,8 +54,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     } catch (err) {
       if (err instanceof ApiError && err.isAuthFailure) {
-        // The stored session outlived its refresh token. Clearing it is the
-        // only recovery, and it must not look like a crash.
+        // The stored session outlived its refresh token. lib/api.ts has
+        // already tried a refresh and signed out by the time this is reached;
+        // signOut is idempotent, and calling it here keeps this path correct
+        // on its own rather than by reading another module. Clearing `me` is
+        // what stops the app showing a signed-in shell with no account behind
+        // it.
         await supabase.auth.signOut();
         setMe(null);
         return;

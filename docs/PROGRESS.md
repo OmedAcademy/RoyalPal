@@ -84,7 +84,7 @@ tutor calendar reports a fetch failure as "nobody can book you" (MOB-13).
 | 4   | MSG-2 101st conversation and every new thread 404            | **DONE** |
 | 5   | SUP-4 reply to a resolved safeguarding ticket reaches nobody | **DONE** |
 | 6   | MOB-3 `/tutor/profile` collides with `tutor/[id]` → HTTP 500 | **DONE** |
-| 7   | MOB-6 401 mid-session is a dead end                          | QUEUED   |
+| 7   | MOB-6 401 mid-session is a dead end                          | **DONE** |
 | 8   | MOB-2 20 of 23 notification types deep-link nowhere          | **DONE** |
 | 9   | SUP-3 support rate limits bypassable at the write boundary   | QUEUED   |
 
@@ -206,6 +206,27 @@ SUP-5, MSG-5, REV-3, MOB-12, MOB-14, MOB-15, MOB-16, MOB-17. All QUEUED.
 - **Note:** `vitest.config.ts` now also includes `mobile/lib/**/*.test.ts`.
   Those modules import by relative path, never through `@`, because that alias
   resolves to the web root here and to the mobile root inside Expo.
+- **Commit:** this one.
+
+### MOB-6 — a 401 mid-session is no longer a dead end · P1
+
+- **Was wrong:** `ApiError.isAuthFailure` was consulted once, at bootstrap.
+  After that, an expired or revoked session turned every screen into an error
+  with a Retry button that could never work — the token it would retry with is
+  the thing that is dead. The app never signed out and never routed anywhere.
+- **Changed:** `mobile/lib/api.ts` answers a 401 in `request()`, the one place
+  every screen's call passes through. One forced `refreshSession()` and exactly
+  one retry — an access token can expire between leaving the device and being
+  validated, and signing someone out over that race would be its own bug — then
+  `signOut()`, which is what turns the dead end into a sign-in screen, since
+  `AuthProvider` listens for the auth state change and the router follows.
+  403 and 5xx are untouched: a 403 is a permission, not a session.
+- **Proof:** `mobile/lib/api.test.ts`, 6 tests. Observed 3 failed → 6 passed.
+- **Note:** this needed `vitest.workspace.ts`. `@` means the web root for
+  Next.js and the Expo root inside `mobile/`, and one config cannot resolve it
+  both ways — which is why mobile bugs were the ones found by reading rather
+  than by running. `npx vitest run` now covers both projects (687 tests, up
+  from the 640 baseline); `--project web` or `--project mobile` runs one.
 - **Commit:** this one.
 
 ## NEEDS SHERKAM
