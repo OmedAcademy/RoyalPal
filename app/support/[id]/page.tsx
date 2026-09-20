@@ -44,6 +44,16 @@ export default async function TicketPage({ params }: { params: Promise<{ id: str
         </span>
       </div>
 
+      {messages.length === 0 && (
+        <p
+          role="status"
+          className="border-hairline text-muted rounded-2xl border border-dashed p-4 text-sm"
+        >
+          This request was opened but its first message didn&apos;t save. Add it below and our team
+          will pick it up — nothing has been lost from your account.
+        </p>
+      )}
+
       <ol className="flex flex-col gap-3">
         {messages.map((m) => (
           <li

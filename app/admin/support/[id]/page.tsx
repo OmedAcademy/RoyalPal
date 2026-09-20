@@ -43,6 +43,17 @@ export default async function AdminTicketPage({ params }: { params: Promise<{ id
         </span>
       </div>
 
+      {messages.length === 0 && (
+        <p
+          role="status"
+          className="border-hairline text-muted rounded-2xl border border-dashed p-4 text-sm"
+        >
+          No messages on this ticket. createTicket writes the ticket and its first message as two
+          statements without a transaction, on purpose — so this is a ticket whose second write
+          failed, not an empty complaint. Ask the requester what happened.
+        </p>
+      )}
+
       <ol className="flex flex-col gap-3">
         {messages.map((m) => (
           <li

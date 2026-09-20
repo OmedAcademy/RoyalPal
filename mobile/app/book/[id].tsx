@@ -58,7 +58,7 @@ export default function BookLessonScreen() {
       <Screen edges={STACK_EDGES}>
         <ErrorState
           message={tutorState.error ?? "Couldn't load that tutor."}
-          onRetry={tutorState.reload}
+          onRetry={tutorState.retryable ? tutorState.reload : undefined}
         />
       </Screen>
     );
@@ -81,19 +81,24 @@ export default function BookLessonScreen() {
 
     if (!result) return;
 
-    if (result.checkoutUrl) {
-      // Opened in the system browser rather than an in-app webview. Card
-      // autofill, 3-D Secure challenges and Stripe's own fraud signals all
-      // depend on a real browser session; a webview silently degrades all
-      // three and gets payments declined.
-      await WebBrowser.openBrowserAsync(result.checkoutUrl);
-      router.replace("/(student)/lessons");
+    // POST /api/v1/bookings answers `ok: true` only when it has a checkout
+    // URL; anything else is an error response, which useMutation turns into
+    // null above. There used to be a second branch here announcing "Booked —
+    // your lesson has been reserved" for a free booking that the server has no
+    // way of producing. An unreachable success message is worse than a missing
+    // one: if the contract ever did change, it would tell someone their lesson
+    // was reserved when nothing had happened.
+    if (!result.checkoutUrl) {
+      Alert.alert("We couldn't start checkout", "Please try again in a moment.");
       return;
     }
 
-    Alert.alert("Booked", "Your lesson has been reserved.", [
-      { text: "OK", onPress: () => router.replace("/(student)/lessons") },
-    ]);
+    // Opened in the system browser rather than an in-app webview. Card
+    // autofill, 3-D Secure challenges and Stripe's own fraud signals all
+    // depend on a real browser session; a webview silently degrades all three
+    // and gets payments declined.
+    await WebBrowser.openBrowserAsync(result.checkoutUrl);
+    router.replace("/(student)/lessons");
   }
 
   return (
@@ -190,7 +195,10 @@ export default function BookLessonScreen() {
         {slotsState.loading ? (
           <Loading label="Finding open times…" />
         ) : slotsState.error ? (
-          <ErrorState message={slotsState.error} onRetry={slotsState.reload} />
+          <ErrorState
+            message={slotsState.error}
+            onRetry={slotsState.retryable ? slotsState.reload : undefined}
+          />
         ) : (slotsState.data?.days.length ?? 0) === 0 ? (
           <EmptyState
             title="No open times"

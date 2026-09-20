@@ -107,7 +107,7 @@ export default function RescheduleScreen() {
       ) : slots.loading ? (
         <Loading label="Finding open times…" />
       ) : slots.error ? (
-        <ErrorState message={slots.error} onRetry={slots.reload} />
+        <ErrorState message={slots.error} onRetry={slots.retryable ? slots.reload : undefined} />
       ) : days.length === 0 ? (
         <EmptyState
           title="No other open times"

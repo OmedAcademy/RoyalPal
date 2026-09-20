@@ -247,6 +247,12 @@ export function Loading({ label = "Loading…" }: { label?: string }) {
   );
 }
 
+/**
+ * `onRetry` is deliberately optional and should be passed only when
+ * `state.retryable` is true. A 404, a 403 or a 422 does not become a different
+ * answer on the second attempt, and a Retry button that cannot work teaches
+ * people that the button means nothing — which costs the times it would have.
+ */
 export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
   const palette = usePalette();
   return (

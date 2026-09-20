@@ -47,7 +47,7 @@ export default function TicketScreen() {
       <Screen edges={STACK_EDGES}>
         <ErrorState
           message={state.error ?? "That request isn't available."}
-          onRetry={state.reload}
+          onRetry={state.retryable ? state.reload : undefined}
         />
       </Screen>
     );
@@ -63,6 +63,15 @@ export default function TicketScreen() {
         <Heading>{ticket.subject}</Heading>
         <Badge label={ticket.status.replace("_", " ")} />
       </View>
+
+      {messages.length === 0 ? (
+        <Card>
+          <Body muted>
+            This request was opened but its first message didn&apos;t save. Add it below and our
+            team will pick it up.
+          </Body>
+        </Card>
+      ) : null}
 
       {messages.map((message) => (
         <Card key={message.id}>

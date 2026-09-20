@@ -96,7 +96,8 @@ MOB-10, MOB-11, MOB-13. SUP-6 is under "Needs Sherkam".
 
 ### P3 — polish
 
-SUP-5, MSG-5, REV-3, MOB-12, MOB-14, MOB-15, MOB-16, MOB-17. All QUEUED.
+**DONE:** SUP-5, MSG-5, REV-3, MOB-12, MOB-15, MOB-16, MOB-17.
+**STILL OPEN:** MOB-14 — see "Needs Sherkam".
 
 ---
 
@@ -416,7 +417,54 @@ needs a device check — listed under "Needs Sherkam".
   `Chooser` filled the screen and put Done under the gesture bar. Platform-
   conditional presentation and safe-area edges.
 
+### P3 — closed out · MSG-5, REV-3, MOB-17, SUP-5, MOB-12, MOB-15, MOB-16
+
+- **MSG-5** — `serializeError` did `String(err)` on non-Errors, and PostgREST
+  errors are plain objects, so every database failure logged `[object Object]`.
+  The user-facing message on those paths is deliberately opaque on the
+  understanding that the operator can see the real thing — and the operator
+  could not. Now keeps message, code, details and hint, read field by field so
+  an error object cannot inject a `level` into the log line or take a cycle
+  into `JSON.stringify`. **Proof:** `lib/observability/logger.test.ts`, 5
+  tests, 2 failed → 5 passed.
+- **REV-3** — only `min` had written copy, so a 6 produced "Too big: expected
+  number to be <=5" and a 3.7 "Invalid input: expected int". Every branch now
+  carries copy, including the ones a star widget cannot produce — the Server
+  Action is a public endpoint, so the form is not the only way in. **Proof:**
+  `lib/validations/review.test.ts`, 6 tests, 5 failed → 6 passed.
+- **MOB-17** — the 15-minute join window was hand-copied into both clients,
+  each with a comment claiming it matched the other. And `canReview` was
+  derived from status and `reviewed` alone, which is weaker than the reviews
+  policy — the same mismatch REV-1 fixed one layer down, so a student could be
+  shown a form for an unpaid lesson and refused after writing it. The booking
+  DTO now carries `join_opens_at` (a timestamp, not a boolean, so a screen left
+  open still reaches the moment) and `can_review`. **Proof:**
+  `lib/supabase/bookings.test.ts`, 8 tests, 7 failed → 8 passed.
+- **SUP-5** — `createTicket` writes the ticket and its first message as two
+  statements without a transaction, deliberately, so a message-less ticket is
+  reachable. All three clients rendered it as a blank thread. Each now says so,
+  and the admin's copy says which of the two writes failed.
+- **MOB-12** — the "Booked — your lesson has been reserved" branch was
+  unreachable: the API answers `ok: true` only with a checkout URL. Removed,
+  with a guard that reports a failure rather than announcing a reservation that
+  did not happen if the contract ever changes.
+- **MOB-15** — `android.permissions: ["NOTIFICATIONS"]` is not an Android
+  permission and expanded to a junk `<uses-permission>`. Removed; expo-
+  notifications' own config plugin contributes `POST_NOTIFICATIONS`.
+- **MOB-16** — seven `onRetry` call sites across six screens offered Retry
+  regardless of `retryable`, so a 404, 403 or 422 got a button that could not
+  work. All gated, with the reason stated once on `ErrorState`.
+
 ## NEEDS SHERKAM
+
+- **MOB-14 — unsaved-changes guard on `availability/edit` and `profile/edit`.**
+  Not attempted. The guard needs expo-router 57's navigation-interception API;
+  `usePreventRemove` is not in the installed tree and `@react-navigation/*` is
+  not resolvable at the top level, so the right call could not be verified.
+  `mobile/AGENTS.md` says to read the versioned docs at
+  docs.expo.dev/versions/v57.0.0 before writing Expo code, and those are not
+  reachable from here. Guessing at the API is how a back button stops working
+  entirely. `availability/edit` already tracks `dirty`; it only needs the hook.
 
 - **A device check for MOB-7, MOB-8, MOB-9 and MOB-10.** All four are
   implemented and typecheck, but the Expo project has no test renderer, so

@@ -44,8 +44,7 @@
           ],
           "category": ["BROWSABLE", "DEFAULT"]
         }
-      ],
-      "permissions": ["NOTIFICATIONS"]
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png",

@@ -3,7 +3,15 @@ import { optionalText } from "@/lib/validations/shared";
 
 export const createReviewSchema = z.object({
   bookingId: z.string().uuid(),
-  rating: z.coerce.number().int().min(1, "Pick a rating").max(5),
+  // Every branch carries written copy, including the ones a star widget
+  // cannot produce. A form is not the only way in — the Server Action is a
+  // public endpoint — and "Expected integer, received float" is the library
+  // talking to itself in front of a student.
+  rating: z.coerce
+    .number({ error: "Pick a rating from 1 to 5" })
+    .int("Pick a whole number of stars")
+    .min(1, "Pick a rating")
+    .max(5, "The highest rating is 5 stars"),
   // Optional: tolerates both an omitted field (null) and a blank textarea ("").
   comment: optionalText(1000),
 });
@@ -12,7 +20,11 @@ export const replyToReviewSchema = z.object({
   reviewId: z.string().uuid(),
   // Matches the CHECK constraint in migration 0035, so the form and the
   // database agree on the limit.
-  reply: z.string().trim().min(1, "Write a reply first").max(2000),
+  reply: z
+    .string()
+    .trim()
+    .min(1, "Write a reply first")
+    .max(2000, "A reply can be up to 2000 characters"),
 });
 
 export const hideReviewSchema = z.object({

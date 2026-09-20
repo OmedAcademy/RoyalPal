@@ -57,7 +57,9 @@ export default function LessonScreen() {
 
   const { booking, timezone, viewerRole, canCancel, canReschedule, cancellationPreview } =
     state.data;
-  const canReview = viewerRole === "student" && booking.status === "completed" && !booking.reviewed;
+  // From the server, where the reviews policy's payment condition can be
+  // checked — deriving it here offered a form the database would refuse.
+  const canReview = booking.can_review;
   const other = viewerRole === "student" ? booking.tutor_name : booking.student_name;
 
   function confirmCancel() {

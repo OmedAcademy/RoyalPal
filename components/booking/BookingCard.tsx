@@ -26,20 +26,22 @@ export function BookingCard({
   // re-validates everything server-side).
   const canRetryPayment =
     viewerRole === "student" && booking.status === "pending_payment" && isUpcoming;
-  const canReview = viewerRole === "student" && booking.status === "completed" && !booking.reviewed;
+  // Decided on the server (lib/supabase/bookings.ts), where the payment
+  // condition from the reviews policy can actually be checked.
+  const canReview = booking.can_review;
   // Same notice as the free-cancellation window, so moving a lesson can never
   // be used to walk around the cancellation policy — see
   // RESCHEDULE_MIN_NOTICE_HOURS in lib/actions/booking.ts.
   const hoursUntilStart = (new Date(booking.start_at).getTime() - Date.now()) / 3_600_000;
   const canReschedule = canCancel && hoursUntilStart >= FREE_CANCELLATION_HOURS;
 
-  // Join window: 15 minutes before start until the lesson's end. Outside it
-  // the link is hidden to avoid people joining an empty room days ahead.
-  const startMs = new Date(booking.start_at).getTime();
-  const endMs = new Date(booking.end_at).getTime();
+  // The window opens at a moment the server decides; whether it has ARRIVED
+  // is decided here, against the reader's own clock, so a page left open
+  // reaches it rather than staying stale.
   const now = Date.now();
-  const withinJoinWindow = now >= startMs - 15 * 60_000 && now <= endMs;
-  const isLive = now >= startMs && now <= endMs;
+  const endMs = new Date(booking.end_at).getTime();
+  const withinJoinWindow = now >= new Date(booking.join_opens_at).getTime() && now <= endMs;
+  const isLive = now >= new Date(booking.start_at).getTime() && now <= endMs;
   const joinUrl =
     booking.status === "confirmed" && withinJoinWindow
       ? safeExternalUrl(booking.meeting_url)

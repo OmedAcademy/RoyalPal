@@ -200,6 +200,14 @@ export type Booking = {
   student_name: string;
   tutor_name: string;
   reviewed?: boolean;
+  /** When the Join button starts working. Decided by the server so there is
+   * one copy of the policy; whether the moment has arrived is decided against
+   * this device's clock, so a screen left open reaches it. */
+  join_opens_at: string;
+  /** Whether this viewer may review this lesson. Server-decided, because the
+   * reviews policy also requires a succeeded payment — deriving it here
+   * offered a form the database would refuse. */
+  can_review: boolean;
 };
 
 export type ConversationSummary = {

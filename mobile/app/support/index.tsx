@@ -79,7 +79,7 @@ export default function SupportScreen() {
       {state.loading ? (
         <Loading />
       ) : state.error ? (
-        <ErrorState message={state.error} onRetry={state.reload} />
+        <ErrorState message={state.error} onRetry={state.retryable ? state.reload : undefined} />
       ) : (state.data?.tickets.length ?? 0) > 0 ? (
         <View
           style={{

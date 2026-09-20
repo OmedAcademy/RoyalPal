@@ -19,11 +19,45 @@ type Level = "debug" | "info" | "warn" | "error";
 export type LogFields = Record<string, unknown>;
 
 /** Turns an unknown thrown value into something safe to serialize. */
+/**
+ * Turns whatever was thrown into fields an operator can act on.
+ *
+ * The `String(err)` fallback was the whole problem: PostgREST errors are plain
+ * objects, not Errors, so every database failure in this codebase logged
+ * "[object Object]". The user-facing message on those paths is deliberately
+ * opaque, on the understanding that the operator can see the real thing — and
+ * the operator could not.
+ */
 function serializeError(err: unknown): LogFields {
   if (err instanceof Error) {
     return { errorName: err.name, errorMessage: err.message, stack: err.stack };
   }
+
+  if (err !== null && typeof err === "object") {
+    // The four fields supabase-js carries. Read individually rather than
+    // spread, so an error object cannot inject a `level` or a `time` into the
+    // log line, and so a circular reference never reaches JSON.stringify.
+    const e = err as Record<string, unknown>;
+    const text = (value: unknown) => (typeof value === "string" ? value : undefined);
+    return {
+      errorMessage: text(e.message) ?? JSON.stringify(shallow(e)),
+      errorCode: text(e.code),
+      errorDetails: text(e.details),
+      errorHint: text(e.hint),
+    };
+  }
+
   return { errorMessage: String(err) };
+}
+
+/** One level deep, primitives only — enough to identify an unfamiliar error
+ * shape without risking a cycle. */
+function shallow(value: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (entry === null || typeof entry !== "object") out[key] = entry;
+  }
+  return out;
 }
 
 export type Logger = {

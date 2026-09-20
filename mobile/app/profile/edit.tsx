@@ -136,10 +136,14 @@ export default function EditProfileScreen() {
       <Screen edges={STACK_EDGES}>
         <ErrorState
           message={profileState.error ?? referenceState.error ?? "We couldn't load your profile."}
-          onRetry={() => {
-            profileState.reload();
-            referenceState.reload();
-          }}
+          onRetry={
+            profileState.retryable || referenceState.retryable
+              ? () => {
+                  profileState.reload();
+                  referenceState.reload();
+                }
+              : undefined
+          }
         />
       </Screen>
     );

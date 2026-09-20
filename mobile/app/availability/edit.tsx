@@ -95,7 +95,7 @@ export default function EditAvailabilityScreen() {
       <Screen edges={STACK_EDGES}>
         <ErrorState
           message={state.error ?? "We couldn't load your availability."}
-          onRetry={state.reload}
+          onRetry={state.retryable ? state.reload : undefined}
         />
       </Screen>
     );

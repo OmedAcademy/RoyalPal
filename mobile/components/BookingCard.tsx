@@ -14,15 +14,19 @@ const TONE: Record<string, "neutral" | "success" | "warning" | "danger"> = {
 };
 
 /**
- * The join window matches the web app exactly: 15 minutes before the start
- * until the end. Showing the link days early sends people into an empty room
- * and generates a support ticket every time.
+ * When the lesson can be joined.
+ *
+ * `join_opens_at` comes from the server, so there is one copy of the policy
+ * instead of two that each carried a comment claiming to match the other.
+ * Whether that moment has arrived is still decided here, against this device's
+ * clock, so a screen left open reaches it. Showing the link days early sends
+ * people into an empty room and generates a support ticket every time.
  */
 function joinWindow(booking: Booking): boolean {
-  const start = new Date(booking.start_at).getTime();
-  const end = new Date(booking.end_at).getTime();
   const now = Date.now();
-  return now >= start - 15 * 60_000 && now <= end;
+  return (
+    now >= new Date(booking.join_opens_at).getTime() && now <= new Date(booking.end_at).getTime()
+  );
 }
 
 export function BookingCard({
