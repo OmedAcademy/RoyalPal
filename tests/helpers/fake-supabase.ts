@@ -243,9 +243,14 @@ export function createFakeSupabase(
      * Postgres would rather than silently matching nothing. Opt-in, so a test
      * that does not care can go on using readable fixture ids. */
     uuidColumns?: string[];
+    /** What each database function returns, by name. */
+    rpc?: Record<string, unknown>;
   } = {},
 ) {
   const uuidColumns = opts.uuidColumns ?? [];
+  /** Every rpc() made through this client, so a test can assert that a query
+   * moved INTO the database rather than merely that its answer changed. */
+  const rpcCalls: { name: string; args: unknown }[] = [];
   const db: Tables = {};
   for (const [name, rows] of Object.entries(tables)) {
     db[name] = rows.map((r) => ({ ...r }));
@@ -263,7 +268,12 @@ export function createFakeSupabase(
     db,
     control,
     authAdminCalls,
+    rpcCalls,
     client: {
+      rpc: async (name: string, args?: unknown) => {
+        rpcCalls.push({ name, args });
+        return { data: opts.rpc?.[name] ?? null, error: null };
+      },
       auth: {
         getUser: async () => ({ data: { user }, error: null }),
         // The GoTrue admin surface. Only the calls the app actually makes are

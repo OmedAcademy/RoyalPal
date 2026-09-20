@@ -90,9 +90,8 @@ tutor calendar reports a fetch failure as "nobody can book you" (MOB-13).
 
 ### P2 — validation, edge cases, performance, reliability, UX states
 
-**DONE:** SUP-2, SUP-7.
-**QUEUED:** MSG-3, MSG-4, REV-1, REV-2, MOB-7, MOB-8, MOB-9, MOB-10, MOB-11,
-MOB-13.
+**DONE:** SUP-2, SUP-7, MSG-3, MSG-4.
+**QUEUED:** REV-1, REV-2, MOB-7, MOB-8, MOB-9, MOB-10, MOB-11, MOB-13.
 **Cannot be fixed here:** SUP-6 — see "Needs Sherkam".
 
 ### P3 — polish
@@ -292,6 +291,36 @@ SUP-5, MSG-5, REV-3, MOB-12, MOB-14, MOB-15, MOB-16, MOB-17. All QUEUED.
   badge showing 0 is a thing to dismiss, not to read.
 - **Proof:** `lib/actions/support.test.ts` (3 new, 11 total) and
   `lib/navigation.test.ts` (4). Observed 3 failed → 15 passed.
+
+### MSG-3 + MSG-4 — the two numbers on the inbox · P2
+
+- **Was wrong (MSG-3):** the preview came from ONE capped query across every
+  listed thread, ordered oldest-first, with the last row per conversation
+  winning. Past the cap it failed from the wrong end: the threads with the most
+  recent activity — the ones at the top of the inbox — showed NO preview, while
+  quiet old threads showed months-old text.
+- **Was wrong (MSG-4):** `unreadMessageCount()` counted messages with no
+  participant predicate and leaned on RLS for scope. Right by accident for a
+  student or tutor. For an ADMIN, whose select policy is every message on the
+  platform, the badge in their navigation counted every unread message between
+  every other pair of people on RoyalPal.
+- **Changed:** migration **0046**. `conversations.last_message_preview`,
+  maintained by the trigger that already maintains `last_message_at`, with a
+  backfill — one column removes the query rather than making it bigger. And
+  `unread_message_count()`, SECURITY INVOKER so RLS still applies underneath,
+  with the join that makes it correct written once in SQL. Also revoked the
+  table-level UPDATE on `conversations` and re-granted `(status,
+closed_reason)`: the preview and the activity timestamp are the trigger's to
+  write, and an admin could otherwise make the inbox say something that never
+  happened.
+- **Proof:** `tests/db/messaging-inbox-counts.test.ts`, 9 tests.
+  `DB_TEST_MAX_MIGRATION=45` → 8 failed; with 0046 → 9 passed. Service layer
+  proven separately by restoring the previous `service.ts` from HEAD: 2 failed
+  → 11 passed in `lib/messaging/service.test.ts`, with the busy thread's
+  preview coming back `null` — the real bug, not a fixture artefact.
+- **Note:** `unread_message_count` is allowlisted in
+  `tests/db/function-grants.test.ts` with its reason. Full suite after this:
+  51 files, 719 tests, all passing.
 
 ## NEEDS SHERKAM
 

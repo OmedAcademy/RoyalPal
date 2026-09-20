@@ -23,11 +23,13 @@ vi.mock("@/lib/notifications/service", () => ({
   NotificationService: { emit: vi.fn(), emitMany: vi.fn() },
 }));
 
-const { getConversation, MESSAGE_PAGE_SIZE } = await import("@/lib/messaging/service");
+const { getConversation, listConversations, unreadMessageCount, MESSAGE_PAGE_SIZE } =
+  await import("@/lib/messaging/service");
 
 /** A conversation row shaped the way PostgREST returns it, embeds included. */
-function conversation(id: string, lastMessageAt: string | null) {
+function conversation(id: string, lastMessageAt: string | null, preview: string | null = null) {
   return {
+    last_message_preview: preview,
     id,
     booking_id: `booking-${id}`,
     student_id: STUDENT,
@@ -45,9 +47,11 @@ function conversation(id: string, lastMessageAt: string | null) {
   };
 }
 
-/** `count` messages in `conversationId`, one per minute, oldest first. */
-function messages(conversationId: string, count: number) {
-  const base = Date.UTC(2026, 0, 1, 0, 0, 0);
+/** `count` messages in `conversationId`, one per minute, oldest first.
+ * `startDay` shifts the whole run, so one thread can be strictly newer than
+ * another — which is what decides who wins a shared cap. */
+function messages(conversationId: string, count: number, startDay = 1) {
+  const base = Date.UTC(2026, 0, startDay, 0, 0, 0);
   return Array.from({ length: count }, (_, i) => ({
     id: `m${String(i).padStart(4, "0")}`,
     conversation_id: conversationId,
@@ -185,5 +189,56 @@ describe("getConversation — whether the thread opens at all (MSG-2)", () => {
     );
 
     expect(await getConversation("c1", STRANGER)).toBeNull();
+  });
+});
+
+describe("listConversations — the line under each name (MSG-3)", () => {
+  it("shows each thread's newest message however long the threads are", async () => {
+    // The preview used to be computed from ONE capped query across every
+    // listed thread, ordered oldest-first. Past the cap it failed from the
+    // wrong end: the busiest threads — the ones at the top of the inbox — got
+    // no preview at all, while quiet old ones showed months-old text.
+    const busy = conversation("busy", "2026-02-01T00:00:00.000Z", "the newest thing said");
+    const quiet = conversation("quiet", "2026-01-01T00:00:00.000Z", "hello from january");
+
+    fake = createFakeSupabase(
+      {
+        conversations: [busy, quiet],
+        // 1200 in the quiet thread, every one of them OLDER than the busy
+        // thread's three. Ordered oldest-first and capped at 1000, the old
+        // query never reached the busy thread at all — and the busy thread is
+        // the one at the top of the inbox.
+        messages: [...messages("quiet", 1200, 1), ...messages("busy", 3, 40)],
+      },
+      { id: STUDENT },
+    );
+
+    const { conversations } = await listConversations(STUDENT);
+    const byId = new Map(conversations.map((c) => [c.id, c.lastMessagePreview]));
+
+    expect(byId.get("busy")).toBe("the newest thing said");
+    expect(byId.get("quiet")).toBe("hello from january");
+  });
+});
+
+describe("unreadMessageCount — whose messages it counts (MSG-4)", () => {
+  it("asks the database rather than counting whatever rows RLS exposes", async () => {
+    // With no participant predicate the count leaned entirely on RLS scope.
+    // For an admin that scope is every message on the platform, so the badge
+    // in their navigation counted other people's conversations.
+    fake = createFakeSupabase(
+      { conversations: [], messages: messages("someone-elses-thread", 500) },
+      { id: STUDENT },
+      { rpc: { unread_message_count: 3 } },
+    );
+
+    expect(await unreadMessageCount(STUDENT)).toBe(3);
+    expect(fake.rpcCalls.map((c) => c.name)).toContain("unread_message_count");
+  });
+
+  it("reports zero rather than a wrong number when the call fails", async () => {
+    fake = createFakeSupabase({ conversations: [], messages: [] }, { id: STUDENT });
+
+    expect(await unreadMessageCount(STUDENT)).toBe(0);
   });
 });

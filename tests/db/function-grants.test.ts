@@ -120,6 +120,11 @@ describe("function grants", () => {
       // returns a boolean the caller already knows — a suspended user is told
       // they are suspended on every page.
       "is_active",
+      // Migration 0046. Takes no arguments, is SECURITY INVOKER so RLS still
+      // applies underneath, and can only ever count the caller's own unread
+      // messages — it exists to NARROW what the badge counted before, which
+      // for an admin was every unread message on the platform.
+      "unread_message_count",
     ]);
 
     const result = await db.query<{ proname: string; role: string }>(

@@ -524,6 +524,9 @@ export interface Database {
           status: ConversationStatus;
           closed_reason: string | null;
           last_message_at: string | null;
+          // Migration 0046. Written by touch_conversation, never by a client:
+          // the column grant withholds it.
+          last_message_preview: string | null;
           created_at: string;
         };
         Insert: {
@@ -698,6 +701,12 @@ export interface Database {
       consume_rate_limit: {
         Args: { p_key: string; p_limit: number; p_window_seconds: number };
         Returns: { allowed: boolean; remaining: number; reset_at: string }[];
+      };
+      // Migration 0046. No arguments: it counts for auth.uid(), which cannot
+      // be passed the wrong value.
+      unread_message_count: {
+        Args: Record<string, never>;
+        Returns: number;
       };
     };
     Enums: {

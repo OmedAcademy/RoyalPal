@@ -84,7 +84,8 @@ export async function ensureConversationForBooking(params: {
 // `profiles!conversations_*_fkey` disambiguates the two paths from a
 // conversation to a profile; `bookings!inner` because a thread without its
 // lesson has nothing to show.
-const CONVERSATION_SELECT = `id, booking_id, student_id, tutor_id, status, closed_reason, last_message_at,
+const CONVERSATION_SELECT = `id, booking_id, student_id, tutor_id, status, closed_reason,
+       last_message_at, last_message_preview,
        bookings!inner(start_at, status, subjects(name)),
        student:profiles!conversations_student_id_fkey(id, full_name, avatar_url),
        tutor:profiles!conversations_tutor_id_fkey(id, full_name, avatar_url)`;
@@ -96,7 +97,6 @@ const MAX_CONVERSATION_PAGE_SIZE = 100;
 function toSummary(
   row: RawConversationRow,
   userId: string,
-  preview: string | null,
   unreadCount: number,
 ): ConversationSummary {
   const viewerIsStudent = row.student_id === userId;
@@ -110,7 +110,11 @@ function toSummary(
     counterpartName: counterpart?.full_name ?? "RoyalPal user",
     counterpartAvatarUrl: counterpart?.avatar_url ?? null,
     lastMessageAt: row.last_message_at,
-    lastMessagePreview: preview,
+    // Denormalised by the same trigger that maintains last_message_at
+    // (migration 0046). It used to be computed from a single capped query
+    // across every listed thread, which ran out of room on exactly the
+    // threads at the top of the inbox.
+    lastMessagePreview: row.last_message_preview,
     unreadCount,
     lessonStartAt: row.bookings.start_at,
     lessonStatus: row.bookings.status,
@@ -156,21 +160,13 @@ export async function listConversations(
     return { conversations: [], page, pageSize, total, hasMore: false };
   }
 
-  const ids = rows.map((r) => r.id);
-  const [unreadByConversation, previewByConversation] = await Promise.all([
-    unreadCountsFor(ids, userId),
-    lastMessagePreviews(ids),
-  ]);
+  const unreadByConversation = await unreadCountsFor(
+    rows.map((r) => r.id),
+    userId,
+  );
 
   return {
-    conversations: rows.map((row) =>
-      toSummary(
-        row,
-        userId,
-        previewByConversation.get(row.id) ?? null,
-        unreadByConversation.get(row.id) ?? 0,
-      ),
-    ),
+    conversations: rows.map((row) => toSummary(row, userId, unreadByConversation.get(row.id) ?? 0)),
     page,
     pageSize,
     total,
@@ -186,6 +182,7 @@ type RawConversationRow = {
   status: "open" | "closed";
   closed_reason: string | null;
   last_message_at: string | null;
+  last_message_preview: string | null;
   bookings: { start_at: string; status: string; subjects: { name: string } | null };
   student: { id: string; full_name: string; avatar_url: string | null } | null;
   tutor: { id: string; full_name: string; avatar_url: string | null } | null;
@@ -221,34 +218,29 @@ async function unreadCountsFor(
   return counts;
 }
 
-async function lastMessagePreviews(conversationIds: string[]): Promise<Map<string, string>> {
-  const previews = new Map<string, string>();
-  if (conversationIds.length === 0) return previews;
-
-  const supabase = await createClient();
-  // Ordered oldest-last so the final write per conversation wins the map.
-  const { data } = await supabase
-    .from("messages")
-    .select("conversation_id, body, created_at")
-    .in("conversation_id", conversationIds)
-    .order("created_at", { ascending: true })
-    .limit(1000);
-
-  for (const row of data ?? []) {
-    previews.set(row.conversation_id, row.body.slice(0, 140));
-  }
-  return previews;
-}
-
-/** Total unread across every thread — the badge in the navigation. */
+/**
+ * Total unread across every thread — the badge in the navigation.
+ *
+ * Through a database function (migration 0046) rather than a filtered select,
+ * because the filter that makes it CORRECT is a join. Counting messages with
+ * no participant predicate and leaning on RLS for scope is right by accident
+ * for a student or a tutor, and wrong for an admin, whose select policy on
+ * messages is every message on the platform — so the badge in their navigation
+ * counted every unread message between every other pair of people.
+ *
+ * `userId` is no longer read: auth.uid() inside the function is the same
+ * answer and cannot be passed the wrong one. Kept in the signature because
+ * every caller has it and dropping it would say nothing.
+ */
 export async function unreadMessageCount(userId: string): Promise<number> {
   const supabase = await createClient();
-  const { count } = await supabase
-    .from("messages")
-    .select("id", { count: "exact", head: true })
-    .neq("sender_id", userId)
-    .is("read_at", null);
-  return count ?? 0;
+  const { data, error } = await supabase.rpc("unread_message_count");
+
+  if (error) {
+    log.error("failed to count unread messages", error, { userId });
+    return 0;
+  }
+  return typeof data === "number" ? data : 0;
 }
 
 /** Messages per page in a thread. */
@@ -341,33 +333,14 @@ export async function getConversation(
     }))
     .reverse();
 
-  const [unread, preview] = await Promise.all([
-    unreadCountsFor([conversationId], userId),
-    // Asked for directly rather than derived from the page above: when reading
-    // an older page, the page's last message is not the thread's last message.
-    lastMessagePreview(conversationId),
-  ]);
+  const unread = await unreadCountsFor([conversationId], userId);
 
   return {
-    conversation: toSummary(row, userId, preview, unread.get(conversationId) ?? 0),
+    conversation: toSummary(row, userId, unread.get(conversationId) ?? 0),
     messages,
     hasMore,
     nextCursor: hasMore && messages.length > 0 ? messages[0].createdAt : null,
   };
-}
-
-/** The newest message in one thread, for its summary line. */
-async function lastMessagePreview(conversationId: string): Promise<string | null> {
-  const supabase = await createClient();
-  const { data } = await supabase
-    .from("messages")
-    .select("body")
-    .eq("conversation_id", conversationId)
-    .order("created_at", { ascending: false })
-    .limit(1);
-
-  const body = data?.[0]?.body;
-  return typeof body === "string" ? body.slice(0, 140) : null;
 }
 
 /**
