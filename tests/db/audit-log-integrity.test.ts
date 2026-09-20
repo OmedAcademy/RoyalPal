@@ -18,16 +18,21 @@ describe("admin_actions integrity", () => {
     db = await createTestDb();
     admin = await createUser(db, "admin", "Ada Admin");
     student = await createUser(db, "student", "Sam Student");
-    await db.query(`insert into public.admin_actions (admin_id, action, target_id) values ($1,'user_status:suspended',$2)`, [admin, student]);
+    await db.query(
+      `insert into public.admin_actions (admin_id, action, target_id) values ($1,'user_status:suspended',$2)`,
+      [admin, student],
+    );
   }, 120_000);
 
-  afterAll(async () => { await db.close(); });
+  afterAll(async () => {
+    await db.close();
+  });
 
   it("refuses an admin deleting their own audit trail", async () => {
     await as(db, user(admin), async () => {
-      await expect(
-        db.query(`delete from public.admin_actions`),
-      ).rejects.toThrow(/permission denied/i);
+      await expect(db.query(`delete from public.admin_actions`)).rejects.toThrow(
+        /permission denied/i,
+      );
     });
   });
 
@@ -42,7 +47,10 @@ describe("admin_actions integrity", () => {
   it("refuses an admin forging an audit entry directly", async () => {
     await as(db, user(admin), async () => {
       await expect(
-        db.query(`insert into public.admin_actions (admin_id, action, target_id) values ($1,'forged',$2)`, [admin, student]),
+        db.query(
+          `insert into public.admin_actions (admin_id, action, target_id) values ($1,'forged',$2)`,
+          [admin, student],
+        ),
       ).rejects.toThrow(/permission denied/i);
     });
   });
@@ -55,7 +63,10 @@ describe("admin_actions integrity", () => {
   it("still lets the service role write it — logAction depends on it", async () => {
     // Every real write goes through createAdminClient(), so this is the path
     // the application actually uses.
-    const rows = await db.query(`insert into public.admin_actions (admin_id, action, target_id) values ($1,'refund',$2) returning id`, [admin, student]);
+    const rows = await db.query(
+      `insert into public.admin_actions (admin_id, action, target_id) values ($1,'refund',$2) returning id`,
+      [admin, student],
+    );
     expect(rows.rows).toHaveLength(1);
   });
 
