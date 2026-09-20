@@ -1,4 +1,5 @@
 import "server-only";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 
 export type TutorSearchResult = {
@@ -258,7 +259,18 @@ export async function getTutorsByIds(ids: string[]): Promise<TutorSearchResult[]
   return (data ?? []).map(normalizeTutorRow);
 }
 
+const uuid = z.string().uuid();
+
 export async function getTutorById(id: string): Promise<TutorSearchResult | null> {
+  // Checked before the query, not after it. Postgres does not ignore a
+  // malformed uuid — `where id = 'profile'` raises 22P02 — so the throw would
+  // surface as a 500 on a route that matched. `/tutor/profile` and
+  // `/tutor/payouts` are web paths that fall into this dynamic route on
+  // mobile, and a plausible screen that fails is worse than one that plainly
+  // does not exist. A tutor who cannot exist is a 404, same as one who does
+  // not.
+  if (!uuid.safeParse(id).success) return null;
+
   const supabase = await createClient();
 
   const { data, error } = await supabase

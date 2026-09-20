@@ -71,10 +71,10 @@ tutor calendar reports a fetch failure as "nobody can book you" (MOB-13).
 
 ### P0 — security, data loss, auth, broken core journeys
 
-| #   | ID                                            | Status |
-| --- | --------------------------------------------- | ------ |
-| 1   | SEC-3 suspension does not end active sessions | QUEUED |
-| 2   | SEC-4 admins can delete the audit log         | QUEUED |
+| #   | ID                                            | Status   |
+| --- | --------------------------------------------- | -------- |
+| 1   | SEC-3 suspension does not end active sessions | **DONE** |
+| 2   | SEC-4 admins can delete the audit log         | **DONE** |
 
 ### P1 — booking, availability, messaging, reviews, admin, mobile navigation
 
@@ -83,9 +83,9 @@ tutor calendar reports a fetch failure as "nobody can book you" (MOB-13).
 | 3   | MSG-1 threads load the oldest 500, newest invisible          | **DONE** |
 | 4   | MSG-2 101st conversation and every new thread 404            | **DONE** |
 | 5   | SUP-4 reply to a resolved safeguarding ticket reaches nobody | **DONE** |
-| 6   | MOB-3 `/tutor/profile` collides with `tutor/[id]` → HTTP 500 | QUEUED   |
+| 6   | MOB-3 `/tutor/profile` collides with `tutor/[id]` → HTTP 500 | **DONE** |
 | 7   | MOB-6 401 mid-session is a dead end                          | QUEUED   |
-| 8   | MOB-2 20 of 23 notification types deep-link nowhere          | QUEUED   |
+| 8   | MOB-2 20 of 23 notification types deep-link nowhere          | **DONE** |
 | 9   | SUP-3 support rate limits bypassable at the write boundary   | QUEUED   |
 
 ### P2 — validation, edge cases, performance, reliability, UX states
@@ -179,6 +179,33 @@ SUP-5, MSG-5, REV-3, MOB-12, MOB-14, MOB-15, MOB-16, MOB-17. All QUEUED.
   switched off.
 - **Proof:** `lib/actions/support.test.ts`, 8 tests. Observed 5 failed → 8
   passed.
+- **Commit:** this one.
+
+### MOB-2 + MOB-3 — notification links land on a real screen · P1
+
+- **Was wrong:** notification hrefs are written once, server-side, for the WEB
+  router, and the app pushed them raw. Two failures. Quiet: `/student/bookings`
+  matches nothing and expo-router shows its "Unmatched Route" DEVELOPER screen
+  in a shipped build. Loud: `/tutor/profile` and `/tutor/payouts` DO match —
+  against `tutor/[id]`, with id="profile" — so the screen asked the API for
+  tutor "profile", Postgres refused the uuid cast, and the person got a 500 on
+  a screen that looked plausible on the way in.
+- **Changed:** `mobile/lib/routes.ts` — `toMobileRoute(href, role)`, a data
+  table rather than branching in a screen, so both places that navigate from a
+  server href give the same answer. `null` means "no such destination here" and
+  the caller does not navigate. Wired into the push-tap handler in
+  `_layout.tsx` (held until the role is known — a cold start from a tap beats
+  `/api/v1/me`) and into the in-app list. Added `mobile/app/+not-found.tsx` as
+  the backstop. Web side: `getTutorById` returns null for a non-uuid id before
+  querying, so the API 404s instead of 500ing for every client, not just this
+  one.
+- **Proof:** `mobile/lib/routes.test.ts`, 12 tests, which read the app's real
+  routes off the filesystem rather than trusting a hand-written list. Observed
+  9 failed against today's behaviour (the identity mapping) → 12 passed.
+  `lib/supabase/tutor-search.test.ts`, 4 tests: 3 failed → 4 passed.
+- **Note:** `vitest.config.ts` now also includes `mobile/lib/**/*.test.ts`.
+  Those modules import by relative path, never through `@`, because that alias
+  resolves to the web root here and to the mobile root inside Expo.
 - **Commit:** this one.
 
 ## NEEDS SHERKAM

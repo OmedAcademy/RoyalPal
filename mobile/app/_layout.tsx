@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Stack, router, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import * as Notifications from "expo-notifications";
@@ -8,6 +8,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { installNotificationHandler } from "@/lib/push";
+import { toMobileRoute } from "@/lib/routes";
 import { usePalette, Loading } from "@/components/ui";
 import { spacing } from "@/lib/theme";
 
@@ -124,27 +125,46 @@ function ConfigurationNotice() {
 }
 
 /**
- * Notification taps. The server puts an app path in `data.href`, so a
+ * Notification taps. The server puts a WEB path in `data.href`, so a
  * notification about a message opens that conversation rather than the home
  * screen — the difference between a notification that is useful and one people
  * swipe away.
+ *
+ * That href is translated rather than pushed. Pushing it raw either showed
+ * expo-router's unmatched-route screen or, for `/tutor/profile`, matched
+ * `tutor/[id]` and produced a 500 from a uuid cast (see lib/routes.ts).
  */
 function useNotificationRouting() {
+  const { me } = useAuth();
+  const [pending, setPending] = useState<string | null>(null);
+
   useEffect(() => {
     // Covers a cold start FROM a notification, which the listener below misses
     // because it fires before any listener is attached.
     void Notifications.getLastNotificationResponseAsync().then((response) => {
       const href = response?.notification.request.content.data?.href;
-      if (typeof href === "string" && href.startsWith("/")) router.push(href);
+      if (typeof href === "string") setPending(href);
     });
 
     const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
       const href = response.notification.request.content.data?.href;
-      if (typeof href === "string" && href.startsWith("/")) router.push(href);
+      if (typeof href === "string") setPending(href);
     });
 
     return () => subscription.remove();
   }, []);
+
+  useEffect(() => {
+    // Held until the role is known. The same notification opens a different
+    // tab for a tutor than for a student, and a cold start from a tap happens
+    // long before /api/v1/me has answered.
+    if (!pending || !me) return;
+    const target = toMobileRoute(pending, me.profile.role);
+    setPending(null);
+    // No target means this app has no such screen. Staying put is the honest
+    // answer; the person is already where the notification took them.
+    if (target) router.push(target);
+  }, [pending, me]);
 }
 
 function Root() {

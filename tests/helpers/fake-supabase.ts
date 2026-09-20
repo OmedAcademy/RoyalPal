@@ -47,6 +47,8 @@ class Query implements PromiseLike<Result<Row[]>> {
     private payload?: Row,
     private onConflict?: string,
     private control?: Control,
+    /** Columns the real schema types as uuid. See castError(). */
+    private uuidColumns: string[] = [],
   ) {}
 
   select(): this {
@@ -135,7 +137,37 @@ class Query implements PromiseLike<Result<Row[]>> {
     );
   }
 
+  /**
+   * Postgres does not ignore a malformed uuid, it refuses the statement:
+   * `where id = 'profile'` raises 22P02 rather than matching nothing. A fake
+   * that quietly returned no rows would let a caller claim it handles a bad id
+   * when the real database would have thrown.
+   */
+  private castError(): DbError | null {
+    if (this.uuidColumns.length === 0) return null;
+    const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    const bad = (column: string, value: unknown) =>
+      this.uuidColumns.includes(column) && typeof value === "string" && !UUID.test(value);
+
+    for (const [column, value] of [...this.filters, ...this.negativeFilters]) {
+      if (bad(column, value)) {
+        return { message: `invalid input syntax for type uuid: "${value}"`, code: "22P02" };
+      }
+    }
+    for (const [column, values] of this.setFilters) {
+      const offender = values.find((v) => bad(column, v));
+      if (offender !== undefined) {
+        return { message: `invalid input syntax for type uuid: "${offender}"`, code: "22P02" };
+      }
+    }
+    return null;
+  }
+
   private run(): Result<unknown> {
+    const cast = this.castError();
+    if (cast) return { data: null, error: cast };
+
     if (this.op === "insert") {
       if (this.control?.insertError) {
         return { data: null, error: this.control.insertError };
@@ -203,7 +235,17 @@ class Query implements PromiseLike<Result<Row[]>> {
   }
 }
 
-export function createFakeSupabase(tables: Tables, user: { id: string } | null = null) {
+export function createFakeSupabase(
+  tables: Tables,
+  user: { id: string } | null = null,
+  opts: {
+    /** Columns to treat as uuid-typed, so a malformed value errors as
+     * Postgres would rather than silently matching nothing. Opt-in, so a test
+     * that does not care can go on using readable fixture ids. */
+    uuidColumns?: string[];
+  } = {},
+) {
+  const uuidColumns = opts.uuidColumns ?? [];
   const db: Tables = {};
   for (const [name, rows] of Object.entries(tables)) {
     db[name] = rows.map((r) => ({ ...r }));
@@ -238,13 +280,18 @@ export function createFakeSupabase(tables: Tables, user: { id: string } | null =
         db[table] ??= [];
         const rows = db[table];
         return {
-          select: () => withSingle(new Query(rows, "select")),
+          select: () =>
+            withSingle(new Query(rows, "select", undefined, undefined, control, uuidColumns)),
           insert: (payload: Row) =>
-            withSingle(new Query(rows, "insert", payload, undefined, control)),
-          update: (patch: Row) => withSingle(new Query(rows, "update", patch)),
-          upsert: (payload: Row, opts?: { onConflict?: string }) =>
-            withSingle(new Query(rows, "upsert", payload, opts?.onConflict)),
-          delete: () => withSingle(new Query(rows, "delete")),
+            withSingle(new Query(rows, "insert", payload, undefined, control, uuidColumns)),
+          update: (patch: Row) =>
+            withSingle(new Query(rows, "update", patch, undefined, control, uuidColumns)),
+          upsert: (payload: Row, queryOpts?: { onConflict?: string }) =>
+            withSingle(
+              new Query(rows, "upsert", payload, queryOpts?.onConflict, control, uuidColumns),
+            ),
+          delete: () =>
+            withSingle(new Query(rows, "delete", undefined, undefined, control, uuidColumns)),
         };
       },
     },

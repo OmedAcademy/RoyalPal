@@ -13,6 +13,14 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["lib/**/*.test.ts", "app/**/*.test.ts", "tests/**/*.test.ts"],
+    include: [
+      "lib/**/*.test.ts",
+      "app/**/*.test.ts",
+      "tests/**/*.test.ts",
+      // Dependency-free mobile modules. They import by relative path, never
+      // through "@", because that alias resolves to the WEB root here and to
+      // the mobile root inside the Expo project.
+      "mobile/lib/**/*.test.ts",
+    ],
   },
 });

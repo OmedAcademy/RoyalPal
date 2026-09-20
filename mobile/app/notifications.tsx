@@ -3,6 +3,8 @@ import { View, Text, Pressable } from "react-native";
 import { router, Stack } from "expo-router";
 import { api } from "@/lib/api";
 import { useApi, useMutation } from "@/lib/useApi";
+import { useAuth } from "@/lib/auth";
+import { toMobileRoute } from "@/lib/routes";
 import {
   Screen,
   Heading,
@@ -22,6 +24,7 @@ type Response = { notifications: NotificationItem[]; unreadCount: number };
 
 export default function NotificationsScreen() {
   const palette = usePalette();
+  const { me } = useAuth();
   const state = useApi<Response>("/api/v1/notifications");
 
   const markRead = useMutation(
@@ -74,7 +77,10 @@ export default function NotificationsScreen() {
                 accessibilityLabel={`${item.title}${item.read ? "" : ", unread"}`}
                 onPress={async () => {
                   if (!item.read) await markRead.run(item.id);
-                  if (item.href) router.push(item.href);
+                  // Translated, never pushed raw — the href is written for the
+                  // web (see lib/routes.ts).
+                  const target = toMobileRoute(item.href, me?.profile.role ?? "student");
+                  if (target) router.push(target);
                   else state.refresh();
                 }}
                 style={({ pressed }) => ({
