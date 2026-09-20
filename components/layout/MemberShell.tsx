@@ -1,6 +1,7 @@
 import { requireProfile, requireProfileAllowingSuspended } from "@/lib/supabase/queries";
 import { NotificationService } from "@/lib/notifications/service";
 import { unreadMessageCount } from "@/lib/messaging/service";
+import { openTicketCount } from "@/lib/support/service";
 import { navigationFor } from "@/lib/navigation";
 import { AppShell } from "@/components/layout/AppShell";
 import { NotificationCenter } from "@/components/notifications/NotificationCenter";
@@ -33,10 +34,13 @@ export async function MemberShell({
     ? await requireProfileAllowingSuspended(allowedRoles)
     : await requireProfile(allowedRoles);
 
-  const [notifications, unreadNotifications, unreadMessages] = await Promise.all([
+  const [notifications, unreadNotifications, unreadMessages, openTickets] = await Promise.all([
     NotificationService.list(),
     NotificationService.unreadCount(),
     unreadMessageCount(profile.id),
+    // Admins only. It reads through the service role and means nothing to
+    // anyone else, so it is not a query every signed-in page should pay for.
+    profile.role === "admin" ? openTicketCount() : Promise.resolve(0),
   ]);
 
   const label =
@@ -46,7 +50,7 @@ export async function MemberShell({
   return (
     <AppShell
       areaLabel={label}
-      items={navigationFor(profile.role, { unreadMessages })}
+      items={navigationFor(profile.role, { unreadMessages, openTickets })}
       headerRight={
         <>
           <NotificationCenter notifications={notifications} unreadCount={unreadNotifications} />

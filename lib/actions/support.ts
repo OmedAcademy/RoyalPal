@@ -96,6 +96,15 @@ export async function createTicket(
       ticketId: ticket.id,
       category: parsed.data.category,
     });
+    // The log line and the alert webhook are both invisible in the product:
+    // the webhook is dormant unless ALERT_WEBHOOK_URL is set, and nobody reads
+    // a log at the moment a child safeguarding report arrives. This is the
+    // signal an admin actually sees.
+    await notifyAdminsOfTicketActivity({
+      ticketId: ticket.id,
+      subject: parsed.data.subject,
+      reason: "opened_urgent",
+    });
   }
 
   revalidatePath("/support");
@@ -182,7 +191,7 @@ export async function replyToTicket(
       await notifyAdminsOfTicketActivity({
         ticketId: ticket.id,
         subject: ticket.subject,
-        urgent,
+        reason: urgent ? "reply_urgent" : "reopened",
       });
     }
   }

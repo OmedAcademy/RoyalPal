@@ -90,8 +90,10 @@ tutor calendar reports a fetch failure as "nobody can book you" (MOB-13).
 
 ### P2 — validation, edge cases, performance, reliability, UX states
 
-SUP-2, SUP-6, SUP-7, MSG-3, MSG-4, REV-1, REV-2, MOB-7, MOB-8, MOB-9, MOB-10,
-MOB-11, MOB-13. All QUEUED.
+**DONE:** SUP-2, SUP-7.
+**QUEUED:** MSG-3, MSG-4, REV-1, REV-2, MOB-7, MOB-8, MOB-9, MOB-10, MOB-11,
+MOB-13.
+**Cannot be fixed here:** SUP-6 — see "Needs Sherkam".
 
 ### P3 — polish
 
@@ -257,7 +259,49 @@ SUP-5, MSG-5, REV-3, MOB-12, MOB-14, MOB-15, MOB-16, MOB-17. All QUEUED.
 
 **P1 is now empty.**
 
+### SUP-2 — a client supplies only the columns that are its to supply · P2
+
+- **Was wrong:** `support_tickets_insert_own` pins `user_id` and 0031 grants
+  INSERT on the whole table, so the defaults were only a fallback for a client
+  polite enough not to mention them. A safeguarding ticket could arrive already
+  `resolved` — missing the admin queue's urgent lift, which filters resolved
+  out — or dated 2999, sorting off the end of a queue ordered oldest-first.
+  Either way the report exists, looks fine in the database, and is never read.
+- **Changed:** migration **0045**, the 0041 pattern: revoke table-level INSERT,
+  then grant it on exactly the columns `createTicket()` sends. `status`,
+  `assigned_admin_id` and `last_message_at` take their defaults. Same for
+  `support_messages`, where a client-supplied `created_at` reorders the record
+  of what was said and when; `from_admin` stays insertable because 0042's
+  policy requires it to equal `public.is_admin()`.
+- **Proof:** `tests/db/support-insert-pinning.test.ts`, 7 tests.
+  `DB_TEST_MAX_MIGRATION=44` → 4 failed; with 0045 → 7 passed. The four
+  neighbouring DB suites (69 tests) still pass.
+
+### SUP-7 — an urgent ticket is visible in the product · P2
+
+- **Was wrong:** escalation was a log line plus a webhook dormant unless
+  `ALERT_WEBHOOK_URL` is set. Nobody reads a log at the moment a safeguarding
+  report arrives. `openTicketCount()` had no callers at all — the badge it was
+  written for was never wired, so an admin had to open the queue to learn
+  anything was in it.
+- **Changed:** `createTicket` now calls `notifyAdminsOfTicketActivity` (built
+  for SUP-4) for the urgent categories, and that helper takes a reason so the
+  three cases read differently. `navigationFor` badges `/admin/support`, and
+  `MemberShell` loads the count for admins only — it reads through the service
+  role and means nothing to anyone else. Zero is undefined rather than 0: a
+  badge showing 0 is a thing to dismiss, not to read.
+- **Proof:** `lib/actions/support.test.ts` (3 new, 11 total) and
+  `lib/navigation.test.ts` (4). Observed 3 failed → 15 passed.
+
 ## NEEDS SHERKAM
+
+- **SUP-6 — retention and review of safeguarding material.** No retention,
+  review or erasure behaviour exists for safeguarding tickets and the messages
+  on them. This is a policy decision before it is code: how long the material
+  is kept, who may review it, and whether an erasure request reaches it at all.
+  `lib/account/anonymize.ts` already carries a `>>> REQUIRES LEGAL REVIEW <<<`
+  note on the same question for accounts. Not fixable here, and a placeholder
+  retention period would be worse than none.
 
 Cannot be fixed here. Not faked with placeholders.
 

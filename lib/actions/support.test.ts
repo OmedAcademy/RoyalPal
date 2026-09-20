@@ -28,6 +28,10 @@ vi.mock("@/lib/rate-limit/limiter", () => ({
 }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
+vi.mock("@/lib/supabase/queries", () => ({
+  activeUserOrError: async () => ({ user: { id: USER } }),
+  requireProfile: async () => ({ id: ADMIN_A, role: "admin" }),
+}));
 vi.mock("@/lib/notifications/service", () => ({
   NotificationService: {
     emit: async (input: { userId: string; type: string; data?: { href?: string } }) => {
@@ -39,7 +43,7 @@ vi.mock("@/lib/notifications/service", () => ({
   },
 }));
 
-const { replyToTicket } = await import("@/lib/actions/support");
+const { createTicket, replyToTicket } = await import("@/lib/actions/support");
 
 function seed(opts: { status: string; category?: string }) {
   fake = createFakeSupabase(
@@ -153,5 +157,63 @@ describe("replyToTicket — who hears about it", () => {
     await replyToTicket({}, form());
 
     expect(adminNotices().map((n) => n.userId)).toEqual([ADMIN_A]);
+  });
+});
+
+describe("createTicket — an urgent report must reach a person", () => {
+  function seedFresh() {
+    fake = createFakeSupabase(
+      {
+        profiles: [
+          { id: USER, role: "student", status: "active" },
+          { id: ADMIN_A, role: "admin", status: "active" },
+          { id: ADMIN_B, role: "admin", status: "active" },
+        ],
+        support_tickets: [],
+        support_messages: [],
+      },
+      { id: USER },
+    );
+  }
+
+  function newTicketForm(category: string) {
+    const fd = new FormData();
+    fd.set("category", category);
+    fd.set("subject", "Something happened in a lesson");
+    fd.set("body", "I need to report what a tutor said to my child.");
+    return fd;
+  }
+
+  it("tells every admin when a safeguarding ticket is opened", async () => {
+    // Before this, opening one produced a log line and a webhook that is
+    // dormant unless ALERT_WEBHOOK_URL is set. Nothing an admin would see.
+    seedFresh();
+
+    await createTicket({}, newTicketForm("safeguarding"));
+
+    expect(
+      adminNotices()
+        .map((n) => n.userId)
+        .sort(),
+    ).toEqual([ADMIN_A, ADMIN_B]);
+    expect(adminNotices()[0].data?.href).toMatch(/^\/admin\/support\//);
+  });
+
+  it("tells every admin when a person is reported", async () => {
+    seedFresh();
+
+    await createTicket({}, newTicketForm("report_user"));
+
+    expect(adminNotices()).toHaveLength(2);
+  });
+
+  it("stays quiet for an ordinary request", async () => {
+    // A billing question is not an escalation, and treating it as one is how
+    // the escalations stop being read.
+    seedFresh();
+
+    await createTicket({}, newTicketForm("payment"));
+
+    expect(adminNotices()).toHaveLength(0);
   });
 });

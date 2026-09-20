@@ -225,7 +225,9 @@ export async function getTicketForAdmin(ticketId: string): Promise<{
   };
 }
 
-/** Open-ticket count, for the admin nav badge. */
+/** Tickets waiting on an admin, for the nav badge. `waiting_on_user` is
+ * excluded on purpose: it is blocked on the requester, so counting it would
+ * make the badge a number nobody can bring down. */
 export async function openTicketCount(): Promise<number> {
   const { count } = await createAdminClient()
     .from("support_tickets")
@@ -246,10 +248,18 @@ export async function openTicketCount(): Promise<number> {
  * Every admin rather than the assigned one: assignment is nullable by design,
  * and the assigned admin may be the one on holiday.
  */
+export type TicketAlertReason = "opened_urgent" | "reply_urgent" | "reopened";
+
+const TICKET_ALERT_TITLES: Record<TicketAlertReason, string> = {
+  opened_urgent: "An urgent support ticket was opened",
+  reply_urgent: "New reply on an urgent support ticket",
+  reopened: "A support ticket was reopened",
+};
+
 export async function notifyAdminsOfTicketActivity(params: {
   ticketId: string;
   subject: string;
-  urgent: boolean;
+  reason: TicketAlertReason;
 }): Promise<void> {
   const admin = createAdminClient();
   const { data: admins } = await admin
@@ -265,9 +275,7 @@ export async function notifyAdminsOfTicketActivity(params: {
     admins.map((row) => ({
       userId: row.id,
       type: "support_ticket_activity" as const,
-      title: params.urgent
-        ? "New reply on an urgent support ticket"
-        : "A support ticket was reopened",
+      title: TICKET_ALERT_TITLES[params.reason],
       body: params.subject,
       // The admin view, not the requester's — the link has to land somewhere
       // the recipient can actually act.

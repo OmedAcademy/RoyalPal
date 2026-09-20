@@ -14,7 +14,10 @@ import type { UserRole } from "@/types/database";
  * ceiling: past that the targets fall below a comfortable touch size on a
  * 360px device, and a tab bar you have to aim at is worse than a menu.
  */
-export function navigationFor(role: UserRole, counts: { unreadMessages?: number } = {}): NavItem[] {
+export function navigationFor(
+  role: UserRole,
+  counts: { unreadMessages?: number; openTickets?: number } = {},
+): NavItem[] {
   const messages: NavItem = {
     href: "/messages",
     label: "Messages",
@@ -57,7 +60,15 @@ export function navigationFor(role: UserRole, counts: { unreadMessages?: number 
     { href: "/admin/bookings", label: "Lessons", icon: "calendar", primary: true },
     { href: "/admin/payments", label: "Payments", icon: "card" },
     { href: "/admin/reviews", label: "Reviews", icon: "star" },
-    { href: "/admin/support", label: "Support", icon: "life-ring", primary: true },
+    {
+      href: "/admin/support",
+      label: "Support",
+      icon: "life-ring",
+      primary: true,
+      // Zero is deliberately undefined rather than 0: a badge showing 0 is a
+      // thing to dismiss, not a thing to read.
+      badge: counts.openTickets || undefined,
+    },
     { href: "/admin/delivery", label: "Delivery", icon: "bell" },
     { href: "/admin/diagnostics", label: "Diagnostics", icon: "shield" },
     { href: "/admin/audit", label: "Audit", icon: "shield", primary: true },
