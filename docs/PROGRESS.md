@@ -1,0 +1,126 @@
+# RoyalPal — work in progress
+
+**Read this file first.** It is the resume point: queue, status and proof for
+every item. Updated after every completed fix.
+
+Branch `claude/royalpal-wa6nzy`. Baseline verified at `b666da5`.
+
+## Standing constraints
+
+- **Stripe is out of scope.** Preserve all Stripe code; if a change touches it,
+  keep its tests passing but change nothing.
+- **Production is off limits.** No migration is ever applied to a hosted
+  database, nothing is deployed, nothing pushed to main.
+- **Proof standard.** A fix is done only when a test failed before it and
+  passed after, and both were observed.
+
+## Baseline (measured at b666da5, not assumed)
+
+| Gate             | Command                         | Result               |
+| ---------------- | ------------------------------- | -------------------- |
+| Typecheck        | `npx tsc --noEmit`              | PASS                 |
+| Lint             | `npx eslint .`                  | PASS                 |
+| Format           | `npx prettier --check .`        | PASS                 |
+| Web tests        | `TZ=UTC npx vitest run`         | 640 passed, 41 files |
+| Mobile typecheck | `cd mobile && npx tsc --noEmit` | PASS                 |
+
+## Phase 1 triage of docs/AUDIT-BACKLOG.md
+
+**ALREADY FIXED** — SEC-1, SEC-2, SUP-1. Proven by
+`tests/db/suspension-enforcement.test.ts` (14 tests) at `fb21b4b`.
+
+**STILL OPEN** — the other 33. Each was re-checked against current code; the
+five leading the queue were confirmed by direct inspection:
+
+| ID    | Confirmed still open by                                                                          |
+| ----- | ------------------------------------------------------------------------------------------------ |
+| SEC-3 | `lib/actions/admin.ts` contains no `signOut`/`ban_duration`/`revoke`                             |
+| SEC-4 | `0011_grants.sql:39` still grants `delete` on `admin_actions` to `authenticated`                 |
+| MSG-1 | `lib/messaging/service.ts:213` `order(created_at, ascending: true).limit(500)`                   |
+| MSG-2 | `lib/messaging/service.ts:204` resolves through `listConversations`, capped at `:88 .limit(100)` |
+| SUP-4 | `lib/actions/support.ts:145` `.eq("status", "waiting_on_user")`                                  |
+
+**NOT A REAL ISSUE** — none reclassified. The findings that were checked all
+still describe the current code.
+
+## Phase 1 inspection of the three never-audited areas
+
+**Performance — better than feared.** Index coverage is sound: every hot filter
+has one (`tutor_profiles_verification_status_idx`, `conversations_student_idx`,
+`conversations_tutor_idx`, `messages_conversation_idx`, `messages_unread_idx`,
+`notifications_user_unread_idx`, `bookings_tutor_id_start_at_idx`). No missing
+index found on a filtered or joined column. The real performance defects are
+the two already in the backlog: MSG-3 (inbox previews share one global
+`limit(1000)`) and MSG-4 (unread count has no participant predicate and relies
+on RLS scope, which for an admin is every message on the platform).
+
+**Error handling.** Seven sites return a raw database or provider error to the
+user: `lib/actions/admin.ts:121,181`, `review.ts:70`, `auth.ts:87,119,225`,
+`booking.ts:542`. REV-1 is the reachable one. No empty catch blocks and no
+unhandled rejections found.
+
+**UI/UX states.** Web list views all have empty states via `AdminTable`.
+Gaps found: `app/support/` has no `loading.tsx` while student/tutor/admin all
+do; a message-less ticket renders as a blank thread in all three clients
+(SUP-5); five mobile screens offer Retry on non-retryable errors (MOB-16); the
+tutor calendar reports a fetch failure as "nobody can book you" (MOB-13).
+
+---
+
+## QUEUE
+
+### P0 — security, data loss, auth, broken core journeys
+
+| #   | ID                                            | Status |
+| --- | --------------------------------------------- | ------ |
+| 1   | SEC-3 suspension does not end active sessions | QUEUED |
+| 2   | SEC-4 admins can delete the audit log         | QUEUED |
+
+### P1 — booking, availability, messaging, reviews, admin, mobile navigation
+
+| #   | ID                                                           | Status |
+| --- | ------------------------------------------------------------ | ------ |
+| 3   | MSG-1 threads load the oldest 500, newest invisible          | QUEUED |
+| 4   | MSG-2 101st conversation and every new thread 404            | QUEUED |
+| 5   | SUP-4 reply to a resolved safeguarding ticket reaches nobody | QUEUED |
+| 6   | MOB-3 `/tutor/profile` collides with `tutor/[id]` → HTTP 500 | QUEUED |
+| 7   | MOB-6 401 mid-session is a dead end                          | QUEUED |
+| 8   | MOB-2 20 of 23 notification types deep-link nowhere          | QUEUED |
+| 9   | SUP-3 support rate limits bypassable at the write boundary   | QUEUED |
+
+### P2 — validation, edge cases, performance, reliability, UX states
+
+SUP-2, SUP-6, SUP-7, MSG-3, MSG-4, REV-1, REV-2, MOB-7, MOB-8, MOB-9, MOB-10,
+MOB-11, MOB-13. All QUEUED.
+
+### P3 — polish
+
+SUP-5, MSG-5, REV-3, MOB-12, MOB-14, MOB-15, MOB-16, MOB-17. All QUEUED.
+
+---
+
+## COMPLETED
+
+_(nothing yet this session)_
+
+---
+
+## NEEDS SHERKAM
+
+Cannot be fixed here. Not faked with placeholders.
+
+- **MOB-1 — Expo EAS project ID.** `extra.eas.projectId` is the all-zero
+  placeholder, so `eas build` cannot run and push is silently dead in every
+  build. Requires `eas init` against your Expo account.
+- **Apple and Google developer accounts** — no build can be signed, uploaded or
+  submitted without them.
+- **Legal review** — seven policy pages, the 18+ minimum, the safeguarding
+  process and the data-retention claims.
+- **Cancellation and refund policy** — the 24-hour rule in code is an
+  engineering default, not a business decision you have published.
+- **Trial-lesson payout decision** — a trial is bookable from a tutor without
+  Connect onboarding; the student is charged and nothing records that the tutor
+  is owed. (Stripe itself is out of scope; this is the business rule.)
+- **Tutor recruitment** — no tutors exist.
+- **Deployment** — applying migrations `0028`–`0042` and deploying. Off limits
+  to me by rule.
