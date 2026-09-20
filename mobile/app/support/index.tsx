@@ -15,6 +15,7 @@ import {
   ErrorState,
   usePalette,
   Divider,
+  STACK_EDGES,
 } from "@/components/ui";
 import { formatRelativeShort } from "@/lib/format";
 import { spacing, radius, MIN_TOUCH_TARGET } from "@/lib/theme";
@@ -67,7 +68,7 @@ export default function SupportScreen() {
   }
 
   return (
-    <Screen refreshing={state.refreshing} onRefresh={state.refresh}>
+    <Screen edges={STACK_EDGES} refreshing={state.refreshing} onRefresh={state.refresh}>
       <Stack.Screen options={{ title: "Support", headerShown: true }} />
       <Heading>Support</Heading>
       <Body muted>

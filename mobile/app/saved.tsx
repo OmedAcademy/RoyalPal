@@ -2,7 +2,15 @@ import { useCallback } from "react";
 import { router, Stack } from "expo-router";
 import { api } from "@/lib/api";
 import { useApi, useMutation } from "@/lib/useApi";
-import { Screen, Heading, Loading, ErrorState, EmptyState, Button } from "@/components/ui";
+import {
+  Screen,
+  Heading,
+  Loading,
+  ErrorState,
+  EmptyState,
+  Button,
+  STACK_EDGES,
+} from "@/components/ui";
 import { TutorCard } from "@/components/TutorCard";
 import type { TutorSummary } from "@/lib/api";
 
@@ -15,7 +23,7 @@ export default function SavedTutorsScreen() {
   );
 
   return (
-    <Screen refreshing={state.refreshing} onRefresh={state.refresh}>
+    <Screen edges={STACK_EDGES} refreshing={state.refreshing} onRefresh={state.refresh}>
       <Stack.Screen options={{ title: "Saved tutors", headerShown: true }} />
       <Heading>Saved tutors</Heading>
 

@@ -128,33 +128,80 @@ export async function searchTutors(filters: TutorSearchFilters): Promise<TutorSe
     if (tutorIds.length === 0) return empty;
   }
 
-  // Country and free-text name live on `profiles`, not `tutor_profiles`, so
-  // they are resolved to an id set first and intersected. Doing it this way
-  // rather than filtering on the embedded profiles row avoids PostgREST
-  // returning a tutor with a null embed instead of excluding them.
+  // Country and free text are resolved to id SETS and intersected, rather
+  // than filtered on the embedded profiles row — PostgREST would return a
+  // tutor with a null embed instead of excluding them.
+  //
+  // Intersected, not merged. The headline matches used to be added to the set
+  // AFTER the country filter had already been applied to it, so searching
+  // "history" with a country of GB returned a tutor in France whose headline
+  // happened to match. Each condition now narrows independently and the
+  // narrowing is applied once, at the end.
   if (filters.country || filters.q) {
-    let profileQuery = supabase.from("profiles").select("id").eq("role", "tutor");
-    if (filters.country) profileQuery = profileQuery.eq("country", filters.country);
-    if (filters.q) profileQuery = profileQuery.ilike("full_name", `%${escapeLike(filters.q)}%`);
+    const narrowBy = (set: Set<string>) => {
+      tutorIds = tutorIds ? tutorIds.filter((id) => set.has(id)) : [...set];
+    };
 
-    const { data: profileMatches, error } = await profileQuery.limit(1000);
-    if (error) throw error;
-
-    const matchedIds = new Set((profileMatches ?? []).map((row) => row.id));
-
-    // A free-text query should also match a headline, which lives on
-    // tutor_profiles — so the two id sets are unioned rather than intersected.
-    if (filters.q) {
-      const { data: headlineMatches } = await supabase
-        .from("tutor_profiles")
+    if (filters.country) {
+      const { data, error } = await supabase
+        .from("profiles")
         .select("id")
-        .ilike("headline", `%${escapeLike(filters.q)}%`)
+        .eq("role", "tutor")
+        .eq("country", filters.country)
         .limit(1000);
-      for (const row of headlineMatches ?? []) matchedIds.add(row.id);
+      if (error) throw error;
+
+      const inCountry = new Set((data ?? []).map((row) => row.id));
+      if (inCountry.size === 0) return empty;
+      narrowBy(inCountry);
+      if (tutorIds && tutorIds.length === 0) return empty;
     }
 
-    tutorIds = tutorIds ? tutorIds.filter((id) => matchedIds.has(id)) : [...matchedIds];
-    if (tutorIds.length === 0) return empty;
+    if (filters.q) {
+      const pattern = `%${escapeLike(filters.q)}%`;
+      const textMatches = new Set<string>();
+
+      const { data: byName, error } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("role", "tutor")
+        .ilike("full_name", pattern)
+        .limit(1000);
+      if (error) throw error;
+      for (const row of byName ?? []) textMatches.add(row.id);
+
+      const { data: byHeadline } = await supabase
+        .from("tutor_profiles")
+        .select("id")
+        .ilike("headline", pattern)
+        .limit(1000);
+      for (const row of byHeadline ?? []) textMatches.add(row.id);
+
+      // A subject is a first-class thing here — its own table, its own filter,
+      // its own column on the tutor — and the search box says "Name or
+      // subject". Matching only name and headline meant typing one returned
+      // nothing at all, which reads as "no tutors teach that" rather than as
+      // "we did not look".
+      const { data: bySubjectName } = await supabase
+        .from("subjects")
+        .select("id")
+        .ilike("name", pattern)
+        .limit(50);
+
+      const subjectIds = (bySubjectName ?? []).map((row) => row.id);
+      if (subjectIds.length > 0) {
+        const { data: teaching } = await supabase
+          .from("tutor_subjects")
+          .select("tutor_id")
+          .in("subject_id", subjectIds)
+          .limit(1000);
+        for (const row of teaching ?? []) textMatches.add(row.tutor_id);
+      }
+
+      if (textMatches.size === 0) return empty;
+      narrowBy(textMatches);
+      if (tutorIds && tutorIds.length === 0) return empty;
+    }
   }
 
   // Suspended tutors are excluded here rather than by a status filter on the

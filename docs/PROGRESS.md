@@ -90,8 +90,8 @@ tutor calendar reports a fetch failure as "nobody can book you" (MOB-13).
 
 ### P2 — validation, edge cases, performance, reliability, UX states
 
-**DONE:** SUP-2, SUP-7, MSG-3, MSG-4, REV-1, REV-2.
-**QUEUED:** MOB-7, MOB-8, MOB-9, MOB-10, MOB-11, MOB-13.
+**ALL DONE.** SUP-2, SUP-7, MSG-3, MSG-4, REV-1, REV-2, MOB-7, MOB-8, MOB-9,
+MOB-10, MOB-11, MOB-13. SUP-6 is under "Needs Sherkam".
 **Cannot be fixed here:** SUP-6 — see "Needs Sherkam".
 
 ### P3 — polish
@@ -359,7 +359,73 @@ closed_reason)`: the preview and the activity timestamp are the trigger's to
   `select()` arguments, which it previously discarded. Full suite after this:
   53 files, 730 tests, all passing.
 
+### MOB-11 — the search box searches what it says it does · P2
+
+- **Was wrong:** the placeholder says "Name or subject"; `q` matched
+  `full_name` and `headline` only. A subject is a first-class thing here — its
+  own table, its own filter, its own column on the tutor — and typing one
+  returned nothing, which reads as "no tutors teach that" rather than as "we
+  did not look".
+- **Also found and fixed:** the headline matches were merged into the id set
+  AFTER the country filter had been applied to it, so searching a word with a
+  country selected returned tutors from other countries. Each condition now
+  narrows independently and the narrowing is applied once.
+- **Proof:** `lib/supabase/tutor-search.test.ts`, 5 new tests (9 total).
+  Observed 2 failed → 9 passed. The first fixture only reproduced one of the
+  two bugs; it was corrected so the country test exercises a French tutor whose
+  HEADLINE matches, which is the shape that used to leak.
+
+### MOB-13 — a failed request is not an empty result · P2
+
+- **Was wrong:** the tutor calendar never read `availability.error`, so a fetch
+  failure fell into the else branch: "You haven't set any availability yet, so
+  nobody can book you." The most alarming sentence on the screen, for a reason
+  that has nothing to do with the tutor, about something they could not fix by
+  doing what it suggests.
+- **Changed:** `mobile/lib/view-state.ts` decides between loading / error /
+  empty / ready from the data — the four states `useApi`'s own docblock names
+  and then left each screen to re-derive. A failed refresh with data already on
+  screen still shows the data. The calendar uses it, and its pull-to-refresh
+  now refreshes availability too, which the new error copy tells people to do.
+- **Proof:** `mobile/lib/view-state.test.ts`, 6 tests. Observed 1 failed
+  against the calendar's actual branching → 6 passed.
+
+### MOB-7, MOB-8, MOB-9, MOB-10 — fixed, but proven by inspection only · P2
+
+The Expo project has no test renderer (`devDependencies` is `@types/react` and
+`typescript`), so component and hook behaviour cannot be exercised here.
+Installing one is a real change to the mobile toolchain and is not something to
+slip into a fix commit. These four are implemented and typecheck, and each
+needs a device check — listed under "Needs Sherkam".
+
+- **MOB-7** — `useApi` fired twice per mount (`useEffect` and `useFocusEffect`
+  both) and had no staleness guard, so on the paginated search screen page 1
+  arriving after page 2 replaced newer results with older ones. Now a monotonic
+  request token gates every state write, and the mount's own focus is skipped
+  by tracking the `load` identity already fetched for — not a "first focus"
+  flag, which would have re-broken on every page change.
+- **MOB-8** — `me` carries the unread badge, was loaded once at sign-in, and
+  `refresh()` had exactly one caller (profile save). The number was frozen for
+  the session. Now refreshed when the app returns to the foreground, and after
+  opening a thread, which is what marks it read.
+- **MOB-9** — `Screen` hard-coded `edges` despite its own comment promising an
+  override, so every stack-pushed screen rendered its last button under the
+  home indicator. The prop now exists, with `STACK_EDGES` applied to the
+  eleven pushed screens.
+- **MOB-10** — `presentationStyle="pageSheet"` is iOS-only, so on Android the
+  `Chooser` filled the screen and put Done under the gesture bar. Platform-
+  conditional presentation and safe-area edges.
+
 ## NEEDS SHERKAM
+
+- **A device check for MOB-7, MOB-8, MOB-9 and MOB-10.** All four are
+  implemented and typecheck, but the Expo project has no test renderer, so
+  nothing here proves them. What to look at: a stack-pushed screen's bottom
+  button clear of the home indicator (iOS) and the Chooser's Done button clear
+  of the gesture bar (Android); the Messages badge changing after a message
+  arrives and after one is read; and the search screen's pages not flickering
+  back to older results. Adding `@testing-library/react-native` would make
+  these testable and is a toolchain decision, not a fix.
 
 - **SUP-6 — retention and review of safeguarding material.** No retention,
   review or erasure behaviour exists for safeguarding tickets and the messages

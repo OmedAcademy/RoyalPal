@@ -13,6 +13,7 @@ import {
   ErrorState,
   EmptyState,
   usePalette,
+  STACK_EDGES,
 } from "@/components/ui";
 import { SlotPicker } from "@/components/SlotPicker";
 import { formatDateTimeIn, timeZoneLabel } from "@/lib/format";
@@ -52,7 +53,7 @@ export default function RescheduleScreen() {
   if (booking.loading) return <Loading />;
   if (booking.error || !booking.data) {
     return (
-      <Screen>
+      <Screen edges={STACK_EDGES}>
         <ErrorState
           message={booking.error ?? "That lesson isn't available."}
           onRetry={booking.retryable ? booking.reload : undefined}

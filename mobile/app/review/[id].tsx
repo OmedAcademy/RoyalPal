@@ -13,6 +13,7 @@ import {
   ErrorState,
   EmptyState,
   usePalette,
+  STACK_EDGES,
 } from "@/components/ui";
 import { formatDateTimeIn } from "@/lib/format";
 import { spacing, radius, MIN_TOUCH_TARGET } from "@/lib/theme";
@@ -48,7 +49,7 @@ export default function ReviewScreen() {
   if (state.loading) return <Loading />;
   if (state.error || !state.data) {
     return (
-      <Screen>
+      <Screen edges={STACK_EDGES}>
         <ErrorState
           message={state.error ?? "That lesson isn't available."}
           onRetry={state.retryable ? state.reload : undefined}

@@ -24,20 +24,31 @@ export function usePalette() {
  *
  * `edges` excludes the bottom by default because the tab bar already owns that
  * inset — applying it twice leaves a visible dead band above the bar. Screens
- * pushed onto a stack (no tab bar) pass the bottom edge themselves.
+ * pushed onto a stack (no tab bar) pass the bottom edge themselves, which this
+ * comment described for some time before the prop existed: the value was
+ * hard-coded, so every pushed screen rendered its last button under the home
+ * indicator.
  */
+/** Every edge, for a screen pushed onto a stack: there is no tab bar below it
+ * to own the bottom inset, so the screen owns it. */
+export const STACK_EDGES = ["top", "bottom", "left", "right"] as const;
+
 export function Screen({
   children,
   scroll = true,
   refreshing,
   onRefresh,
   contentStyle,
+  edges = ["top", "left", "right"],
 }: {
   children: ReactNode;
   scroll?: boolean;
   refreshing?: boolean;
   onRefresh?: () => void;
   contentStyle?: ViewStyle;
+  /** Safe-area edges to apply. Default omits the bottom, which the tab bar
+   * owns; a stack-pushed screen passes STACK_EDGES. */
+  edges?: readonly ("top" | "bottom" | "left" | "right")[];
 }) {
   const palette = usePalette();
   const body = (
@@ -47,10 +58,7 @@ export function Screen({
   );
 
   return (
-    <SafeAreaView
-      edges={["top", "left", "right"]}
-      style={{ flex: 1, backgroundColor: palette.background }}
-    >
+    <SafeAreaView edges={edges} style={{ flex: 1, backgroundColor: palette.background }}>
       {scroll ? (
         <ScrollView
           contentContainerStyle={{ flexGrow: 1 }}

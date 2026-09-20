@@ -2,6 +2,7 @@ import { View, Text } from "react-native";
 import { router } from "expo-router";
 import { useAuth } from "@/lib/auth";
 import { useApi } from "@/lib/useApi";
+import { viewState } from "@/lib/view-state";
 import {
   Screen,
   Heading,
@@ -36,6 +37,10 @@ export default function TutorCalendarScreen() {
   const { me } = useAuth();
   const bookings = useApi<BookingsResponse>("/api/v1/bookings");
   const availability = useApi<AvailabilityResponse>("/api/v1/availability");
+  // Four states, decided from the data rather than from whichever branch a
+  // ternary fell into. The else branch used to absorb a failed request and
+  // tell a tutor nobody could book them.
+  const availabilityView = viewState(availability, (a) => a.rules.length === 0);
 
   const timezone = bookings.data?.timezone ?? me?.profile.timezone ?? "UTC";
   const upcoming = (bookings.data?.bookings ?? [])
@@ -54,7 +59,15 @@ export default function TutorCalendarScreen() {
   }
 
   return (
-    <Screen refreshing={bookings.refreshing} onRefresh={bookings.refresh}>
+    <Screen
+      refreshing={bookings.refreshing || availability.refreshing}
+      onRefresh={() => {
+        // Both, because the error state below tells people to pull down to
+        // retry the availability request — and it only refreshed the bookings.
+        bookings.refresh();
+        availability.refresh();
+      }}
+    >
       <Heading>Calendar</Heading>
       <Body muted>
         Times shown in your own time zone
@@ -99,11 +112,16 @@ export default function TutorCalendarScreen() {
 
       <Card>
         <Text style={{ fontWeight: "600" }}>Your weekly availability</Text>
-        {availability.loading ? (
+        {availabilityView.kind === "loading" ? (
           <Body muted>Loading…</Body>
-        ) : availability.data && availability.data.rules.length > 0 ? (
+        ) : availabilityView.kind === "error" ? (
+          <Body muted>
+            We couldn&apos;t load your availability just now, so this may be out of date. Pull down
+            to try again.
+          </Body>
+        ) : availabilityView.kind === "ready" ? (
           <View style={{ gap: spacing.xs }}>
-            {availability.data.rules
+            {availabilityView.data.rules
               .slice()
               .sort((a, b) => a.day_of_week - b.day_of_week)
               .map((rule, index) => (
@@ -112,10 +130,10 @@ export default function TutorCalendarScreen() {
                   {rule.end_time.slice(0, 5)}
                 </Text>
               ))}
-            {availability.data.exceptions.length > 0 ? (
+            {availabilityView.data.exceptions.length > 0 ? (
               <Text style={{ color: palette.muted, marginTop: spacing.xs }}>
-                {availability.data.exceptions.length} date exception
-                {availability.data.exceptions.length === 1 ? "" : "s"} set.
+                {availabilityView.data.exceptions.length} date exception
+                {availabilityView.data.exceptions.length === 1 ? "" : "s"} set.
               </Text>
             ) : null}
           </View>

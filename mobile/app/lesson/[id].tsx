@@ -13,6 +13,7 @@ import {
   Loading,
   ErrorState,
   usePalette,
+  STACK_EDGES,
 } from "@/components/ui";
 import { formatDateTimeIn, formatMoney, timeZoneLabel, BOOKING_STATUS_LABELS } from "@/lib/format";
 import { spacing } from "@/lib/theme";
@@ -45,7 +46,7 @@ export default function LessonScreen() {
   if (state.loading) return <Loading />;
   if (state.error || !state.data) {
     return (
-      <Screen>
+      <Screen edges={STACK_EDGES}>
         <ErrorState
           message={state.error ?? "That lesson isn't available."}
           onRetry={state.retryable ? state.reload : undefined}

@@ -14,6 +14,7 @@ import {
   Loading,
   ErrorState,
   usePalette,
+  STACK_EDGES,
 } from "@/components/ui";
 import { formatRelativeShort } from "@/lib/format";
 import { spacing } from "@/lib/theme";
@@ -43,7 +44,7 @@ export default function TicketScreen() {
   if (state.loading) return <Loading />;
   if (state.error || !state.data) {
     return (
-      <Screen>
+      <Screen edges={STACK_EDGES}>
         <ErrorState
           message={state.error ?? "That request isn't available."}
           onRetry={state.reload}

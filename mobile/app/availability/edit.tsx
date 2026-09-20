@@ -12,6 +12,7 @@ import {
   Loading,
   ErrorState,
   usePalette,
+  STACK_EDGES,
 } from "@/components/ui";
 import { Chooser, type Choice } from "@/components/Chooser";
 import { spacing, MIN_TOUCH_TARGET } from "@/lib/theme";
@@ -91,7 +92,7 @@ export default function EditAvailabilityScreen() {
   if (state.loading) return <Loading />;
   if (state.error || !state.data) {
     return (
-      <Screen>
+      <Screen edges={STACK_EDGES}>
         <ErrorState
           message={state.error ?? "We couldn't load your availability."}
           onRetry={state.reload}

@@ -1,5 +1,14 @@
 import { useMemo, useState } from "react";
-import { View, Text, Pressable, Modal, FlatList, TextInput, StyleSheet } from "react-native";
+import {
+  View,
+  Text,
+  Pressable,
+  Modal,
+  FlatList,
+  TextInput,
+  StyleSheet,
+  Platform,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { usePalette, Button, Body } from "@/components/ui";
 import { spacing, radius, MIN_TOUCH_TARGET } from "@/lib/theme";
@@ -95,9 +104,16 @@ export function Chooser({
         visible={open}
         animationType="slide"
         onRequestClose={() => setOpen(false)}
-        presentationStyle="pageSheet"
+        // pageSheet is iOS-only. On Android the modal fills the screen, so
+        // the inset the sheet would have provided has to come from the safe
+        // area instead — without it the Done button below sits under the
+        // gesture bar, which is the one control this modal cannot do without.
+        presentationStyle={Platform.OS === "ios" ? "pageSheet" : "fullScreen"}
       >
-        <SafeAreaView style={{ flex: 1, backgroundColor: palette.background }} edges={["top"]}>
+        <SafeAreaView
+          style={{ flex: 1, backgroundColor: palette.background }}
+          edges={Platform.OS === "ios" ? ["top"] : ["top", "bottom"]}
+        >
           <View style={{ padding: spacing.lg, gap: spacing.md, flex: 1 }}>
             <Text style={{ fontSize: 20, fontWeight: "700", color: palette.foreground }}>
               {label}

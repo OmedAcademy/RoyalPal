@@ -15,6 +15,7 @@ import {
   Button,
   usePalette,
   Divider,
+  STACK_EDGES,
 } from "@/components/ui";
 import { formatRelativeShort } from "@/lib/format";
 import { spacing } from "@/lib/theme";
@@ -32,7 +33,7 @@ export default function NotificationsScreen() {
   );
 
   return (
-    <Screen refreshing={state.refreshing} onRefresh={state.refresh}>
+    <Screen edges={STACK_EDGES} refreshing={state.refreshing} onRefresh={state.refresh}>
       <Stack.Screen options={{ title: "Notifications" }} />
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
         <Heading>Notifications</Heading>

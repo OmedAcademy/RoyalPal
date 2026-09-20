@@ -14,6 +14,7 @@ import {
   ErrorState,
   EmptyState,
   usePalette,
+  STACK_EDGES,
 } from "@/components/ui";
 import { SlotPicker } from "@/components/SlotPicker";
 import { formatMoney } from "@/lib/format";
@@ -54,7 +55,7 @@ export default function BookLessonScreen() {
   if (tutorState.loading) return <Loading />;
   if (tutorState.error || !tutorState.data) {
     return (
-      <Screen>
+      <Screen edges={STACK_EDGES}>
         <ErrorState
           message={tutorState.error ?? "Couldn't load that tutor."}
           onRetry={tutorState.reload}

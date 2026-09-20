@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import { useLocalSearchParams, Stack } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { api } from "@/lib/api";
 import { useApi, useMutation } from "@/lib/useApi";
+import { useAuth } from "@/lib/auth";
 import { Loading, ErrorState, Button, usePalette } from "@/components/ui";
 import { formatTimeIn, formatDateTimeIn } from "@/lib/format";
 import { spacing, radius, MIN_TOUCH_TARGET } from "@/lib/theme";
@@ -28,6 +29,9 @@ type Response = {
 export default function ConversationScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const palette = usePalette();
+  // Opening a thread marks it read server-side, so the unread badge is stale
+  // the moment this screen renders. Re-reading `me` is what moves it.
+  const { refresh: refreshBadges } = useAuth();
   const [draft, setDraft] = useState("");
   const scrollRef = useRef<ScrollView>(null);
   // Pages fetched by "load earlier", oldest first. Held here rather than in
@@ -38,6 +42,11 @@ export default function ConversationScreen() {
   const [loadingEarlier, setLoadingEarlier] = useState(false);
 
   const state = useApi<Response>(id ? `/api/v1/conversations/${id}` : null, [id]);
+
+  const loaded = state.data !== null;
+  useEffect(() => {
+    if (loaded) void refreshBadges();
+  }, [loaded, refreshBadges]);
 
   const send = useMutation(
     useCallback(

@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { AppState } from "react-native";
 import type { Session } from "@supabase/supabase-js";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { api, ApiError, type Me } from "@/lib/api";
@@ -106,6 +107,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } = await supabase.auth.getSession();
     await loadMe(current);
   }, [loadMe]);
+
+  // `me` carries the unread badge, and it was loaded once at sign-in with
+  // exactly one caller for refresh() — saving your profile. So the number on
+  // the Messages tab was fixed for the whole session: it did not go up when a
+  // message arrived, and it did not go down when you read one. A badge that
+  // never changes is worse than no badge, because people learn to ignore it.
+  //
+  // Coming back to the app is the moment worth re-checking: it is when a
+  // notification was tapped, or when the phone was put down and picked up
+  // again. TOKEN_REFRESHED is deliberately NOT such a moment — see above.
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    const subscription = AppState.addEventListener("change", (next) => {
+      if (next === "active") void refresh();
+    });
+    return () => subscription.remove();
+  }, [refresh]);
 
   const signOut = useCallback(async () => {
     // Unregister BEFORE dropping the session: the call is authenticated, and

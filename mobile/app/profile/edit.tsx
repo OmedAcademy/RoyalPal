@@ -4,7 +4,17 @@ import { router, Stack } from "expo-router";
 import { api } from "@/lib/api";
 import { useApi, useMutation } from "@/lib/useApi";
 import { useAuth } from "@/lib/auth";
-import { Screen, Heading, Body, Card, Field, Button, Loading, ErrorState } from "@/components/ui";
+import {
+  Screen,
+  Heading,
+  Body,
+  Card,
+  Field,
+  Button,
+  Loading,
+  ErrorState,
+  STACK_EDGES,
+} from "@/components/ui";
 import { Chooser, type Choice } from "@/components/Chooser";
 import { spacing } from "@/lib/theme";
 
@@ -123,7 +133,7 @@ export default function EditProfileScreen() {
   if (profileState.loading || referenceState.loading) return <Loading />;
   if (profileState.error || !profileState.data || referenceState.error || !referenceState.data) {
     return (
-      <Screen>
+      <Screen edges={STACK_EDGES}>
         <ErrorState
           message={profileState.error ?? referenceState.error ?? "We couldn't load your profile."}
           onRetry={() => {

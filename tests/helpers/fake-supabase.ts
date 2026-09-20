@@ -32,6 +32,7 @@ class Query implements PromiseLike<Result<Row[]>> {
   private setFilters: [string, unknown[]][] = [];
   private nullFilters: [string, unknown][] = [];
   private lessThanFilters: [string, unknown][] = [];
+  private likeFilters: [string, string][] = [];
   private rowRange: [number, number] | null = null;
   private wantsCount = false;
   private headOnly = false;
@@ -91,6 +92,14 @@ class Query implements PromiseLike<Result<Row[]>> {
     return this;
   }
 
+  /** Case-insensitive pattern match, with real `%` and `_` semantics — a fake
+   * that treated the pattern as a substring would pass a test for search while
+   * the escaping underneath it was wrong. */
+  ilike(column: string, pattern: string): this {
+    this.likeFilters.push([column, pattern]);
+    return this;
+  }
+
   /** Strict less-than — the keyset cursor for paging back through a thread. */
   lt(column: string, value: unknown): this {
     this.lessThanFilters.push([column, value]);
@@ -140,7 +149,8 @@ class Query implements PromiseLike<Result<Row[]>> {
       this.negativeFilters.every(([c, v]) => row[c] !== v) &&
       this.setFilters.every(([c, vs]) => vs.includes(row[c])) &&
       this.nullFilters.every(([c, v]) => (v === null ? row[c] == null : row[c] === v)) &&
-      this.lessThanFilters.every(([c, v]) => row[c] != null && (row[c] as never) < (v as never))
+      this.lessThanFilters.every(([c, v]) => row[c] != null && (row[c] as never) < (v as never)) &&
+      this.likeFilters.every(([c, p]) => matchesLike(row[c], p))
     );
   }
 
@@ -244,6 +254,25 @@ class Query implements PromiseLike<Result<Row[]>> {
   ): PromiseLike<A | B> {
     return Promise.resolve(this.run() as Result<Row[]>).then(onfulfilled, onrejected);
   }
+}
+
+/** Postgres ILIKE: `%` is any run, `_` is one character, `\\` escapes both. */
+function matchesLike(value: unknown, pattern: string): boolean {
+  if (typeof value !== "string") return false;
+  let regex = "";
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i];
+    if (ch === "\\") {
+      regex += pattern[++i]?.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") ?? "";
+    } else if (ch === "%") {
+      regex += ".*";
+    } else if (ch === "_") {
+      regex += ".";
+    } else {
+      regex += ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+  }
+  return new RegExp(`^${regex}$`, "i").test(value);
 }
 
 export function createFakeSupabase(
