@@ -101,7 +101,34 @@ SUP-5, MSG-5, REV-3, MOB-12, MOB-14, MOB-15, MOB-16, MOB-17. All QUEUED.
 
 ## COMPLETED
 
-_(nothing yet this session)_
+### SEC-3 — suspension now ends the session · P0
+
+- **Was wrong:** `setUserStatus` wrote `profiles.status` and nothing else, so a
+  suspended account kept a valid, refreshable JWT. Migration 0042 stops it
+  writing through PostgREST, but the session itself stayed alive until it
+  expired.
+- **Changed:** `lib/actions/admin.ts` now calls
+  `auth.admin.updateUserById(userId, { ban_duration })` — `876000h` on suspend,
+  `"none"` on reactivate, so a reversible action stays reversible. Best-effort
+  and logged: the status column is already committed and is the source of
+  truth. `tests/helpers/fake-supabase.ts` gained the GoTrue admin surface and
+  records every call.
+- **Proof:** `lib/actions/admin.test.ts`, 3 new tests. Observed 2 failed → 13
+  passed.
+- **Commit:** see below.
+
+### SEC-4 — the audit log is append-only · P0
+
+- **Was wrong:** `0011` granted insert/update/delete on `admin_actions` to
+  `authenticated` and `0010`'s policy is `for all using is_admin()`, so any
+  admin could delete the record of their own actions. Proven: rows=1.
+- **Changed:** migration **0043** revokes insert/update/delete from
+  `authenticated` and `anon`, keeping SELECT for the console. Every real write
+  already goes through the service role via `logAction()`, so nothing the app
+  does is lost.
+- **Proof:** `tests/db/audit-log-integrity.test.ts`, 6 tests. Observed
+  `DB_TEST_MAX_MIGRATION=42` → 3 failed; with 0043 → 6 passed.
+- **Commit:** see below.
 
 ---
 

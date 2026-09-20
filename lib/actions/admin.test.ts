@@ -36,7 +36,7 @@ vi.mock("@/lib/notifications/service", () => ({
 }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-const { refundBooking } = await import("@/lib/actions/admin");
+const { refundBooking, setUserStatus } = await import("@/lib/actions/admin");
 
 function seed(opts: { paymentStatus?: string | null; user?: string | null } = {}) {
   fake = createFakeSupabase(
@@ -163,5 +163,71 @@ describe("refundBooking — graceful degradation", () => {
     );
     expect(refundBookingPayment).not.toHaveBeenCalled();
     expect(fake.db.admin_actions).toHaveLength(0);
+  });
+});
+
+describe("setUserStatus — suspension must end the session (SEC-3)", () => {
+  const VICTIM = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+
+  function seedUsers(callerRole: "admin" | "student" = "admin") {
+    fake = createFakeSupabase(
+      {
+        profiles: [
+          { id: ADMIN, role: callerRole },
+          { id: VICTIM, role: "student", status: "active" },
+        ],
+        admin_actions: [],
+      },
+      { id: ADMIN },
+    );
+  }
+
+  function form(status: string) {
+    const f = new FormData();
+    f.set("userId", VICTIM);
+    f.set("status", status);
+    return f;
+  }
+
+  it("revokes the account's sessions when suspending", async () => {
+    // Writing profiles.status alone leaves a valid, refreshable JWT. Migration
+    // 0042 stops a suspended account from writing through PostgREST, but the
+    // session itself has to die too — otherwise suspension is a column change
+    // the holder of the token never notices.
+    seedUsers();
+
+    const res = await setUserStatus({}, form("suspended"));
+
+    expect(res.error).toBeUndefined();
+    expect(fake.db.profiles.find((p) => p.id === VICTIM)?.status).toBe("suspended");
+
+    const revocation = fake.authAdminCalls.find((c) => c.id === VICTIM);
+    expect(revocation, "suspension must revoke the session, not just set a column").toBeDefined();
+    expect(revocation!.method).toBe("updateUserById");
+    expect(revocation!.attrs.ban_duration).toBeTruthy();
+    expect(revocation!.attrs.ban_duration).not.toBe("none");
+  });
+
+  it("lifts the revocation when reactivating", async () => {
+    // A reactivated account that stays banned in GoTrue can never sign in
+    // again, which would turn a reversible moderation action into a permanent
+    // lockout.
+    seedUsers();
+
+    const res = await setUserStatus({}, form("active"));
+
+    expect(res.error).toBeUndefined();
+    const revocation = fake.authAdminCalls.find((c) => c.id === VICTIM);
+    expect(revocation).toBeDefined();
+    expect(revocation!.attrs.ban_duration).toBe("none");
+  });
+
+  it("does not revoke anything when the caller is not an admin", async () => {
+    seedUsers("student");
+
+    const res = await setUserStatus({}, form("suspended"));
+
+    expect(res.error).toBe("Admins only");
+    expect(fake.authAdminCalls).toHaveLength(0);
   });
 });

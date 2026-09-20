@@ -180,6 +180,32 @@ export async function setUserStatus(
 
   if (error) return { error: error.message };
 
+  // Writing the column is not enough. A suspended account keeps a valid,
+  // refreshable JWT, and the anon key is public by design — so before
+  // migration 0042 the suspended user could still write through PostgREST,
+  // and even with 0042 blocking those writes their session would simply keep
+  // working until it expired. Suspension has to end the session too.
+  //
+  // ban_duration is GoTrue's own mechanism and is what actually invalidates
+  // the refresh token; setting it to "none" lifts the ban, which is why
+  // reactivating has to clear it or a reversible moderation action becomes a
+  // permanent lockout.
+  //
+  // Best-effort by design: the status column is the source of truth and is
+  // already committed above. If GoTrue is unreachable we log loudly rather
+  // than fail the whole action and leave an admin unsure whether the
+  // suspension took.
+  const banDuration = parsed.data.status === "suspended" ? "876000h" : "none";
+  const { error: revokeError } = await admin.auth.admin.updateUserById(parsed.data.userId, {
+    ban_duration: banDuration,
+  });
+  if (revokeError) {
+    log.error("failed to update the account's auth ban", revokeError, {
+      userId: parsed.data.userId,
+      status: parsed.data.status,
+    });
+  }
+
   await logAction(auth.adminId, `user_status:${parsed.data.status}`, parsed.data.userId);
   revalidatePath("/admin/students");
   revalidatePath("/admin/tutors");

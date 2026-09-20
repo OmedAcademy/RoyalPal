@@ -183,6 +183,8 @@ export function createFakeSupabase(tables: Tables, user: { id: string } | null =
     db[name] = rows.map((r) => ({ ...r }));
   }
   const control: Control = { insertError: null };
+  /** Every GoTrue admin call made through this client, in order. */
+  const authAdminCalls: { method: string; id: string; attrs: Record<string, unknown> }[] = [];
 
   // `single()` is a reserved-ish name on the class; expose it by wrapping so
   // the chain reads exactly like the real client at the call sites.
@@ -192,9 +194,19 @@ export function createFakeSupabase(tables: Tables, user: { id: string } | null =
   return {
     db,
     control,
+    authAdminCalls,
     client: {
       auth: {
         getUser: async () => ({ data: { user }, error: null }),
+        // The GoTrue admin surface. Only the calls the app actually makes are
+        // modelled; each records its arguments so a test can assert that a
+        // session was revoked rather than merely that a column was written.
+        admin: {
+          updateUserById: async (id: string, attrs: Record<string, unknown>) => {
+            authAdminCalls.push({ method: "updateUserById", id, attrs });
+            return { data: { user: { id } }, error: null };
+          },
+        },
       },
       from(table: string) {
         db[table] ??= [];
