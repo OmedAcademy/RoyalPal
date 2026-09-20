@@ -156,6 +156,12 @@ export async function searchTutors(filters: TutorSearchFilters): Promise<TutorSe
     if (tutorIds.length === 0) return empty;
   }
 
+  // Suspended tutors are excluded here rather than by a status filter on the
+  // embedded profiles row: PostgREST would return the tutor with a null embed
+  // instead of dropping them, which is the same trap the country/name
+  // filtering above already avoids.
+  const suspended = await suspendedTutorIds(supabase);
+
   let query = supabase
     .from("tutor_profiles")
     .select(TUTOR_SELECT, { count: "exact" })
@@ -166,6 +172,11 @@ export async function searchTutors(filters: TutorSearchFilters): Promise<TutorSe
 
   if (tutorIds) {
     query = query.in("id", tutorIds);
+  }
+  // Guarded: PostgREST renders an empty `in` list as `()`, which is a syntax
+  // error rather than a no-op.
+  if (suspended.length > 0) {
+    query = query.not("id", "in", `(${suspended.join(",")})`);
   }
   if (filters.language) {
     query = query.contains("teaching_languages", [filters.language]);
@@ -201,15 +212,46 @@ function escapeLike(value: string): string {
 /** Loads specific approved tutors by id (order not guaranteed). Used by the
  * student dashboard's favourites list. Respects the same approved-only
  * visibility as search. */
+/**
+ * The tutors whose ACCOUNT is not active, so search can exclude them.
+ *
+ * verification_status and profiles.status are different things and both have
+ * to hold: the first says an admin approved this tutor's application, the
+ * second says the account is not suspended. Search filtered on the first only,
+ * so suspending a tutor for misconduct left them listed and bookable — the
+ * moderation action had no effect on the marketplace.
+ *
+ * Returned as an exclusion list rather than an inclusion one because
+ * suspension is rare: this query returns a handful of rows, where "every
+ * active tutor" would return the whole table on every search.
+ */
+async function suspendedTutorIds(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("role", "tutor")
+    .neq("status", "active")
+    .limit(1000);
+
+  if (error) throw error;
+  return (data ?? []).map((row) => row.id);
+}
+
 export async function getTutorsByIds(ids: string[]): Promise<TutorSearchResult[]> {
   if (ids.length === 0) return [];
   const supabase = await createClient();
+
+  const suspended = new Set(await suspendedTutorIds(supabase));
+  const visible = ids.filter((id) => !suspended.has(id));
+  if (visible.length === 0) return [];
 
   const { data, error } = await supabase
     .from("tutor_profiles")
     .select(TUTOR_SELECT)
     .eq("verification_status", "approved")
-    .in("id", ids)
+    .in("id", visible)
     .returns<RawTutorRow[]>();
 
   if (error) throw error;
@@ -229,6 +271,11 @@ export async function getTutorById(id: string): Promise<TutorSearchResult | null
 
   if (error) throw error;
   if (!data) return null;
+
+  // A suspended tutor's profile page is gone too, not just their search
+  // listing — otherwise a saved link still reaches a bookable-looking page.
+  const suspended = await suspendedTutorIds(supabase);
+  if (suspended.includes(id)) return null;
 
   return normalizeTutorRow(data);
 }

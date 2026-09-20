@@ -445,7 +445,10 @@ describe("column exposure", () => {
             and pg_get_function_result(p.oid) <> 'trigger'
             and not exists (select 1 from pg_depend d where d.objid = p.oid and d.deptype = 'e')
             and has_function_privilege('anon', p.oid, 'EXECUTE')
-            and p.proname <> 'is_admin'`,
+            -- is_admin and is_active are both called from RLS policies, which
+            -- run as the querying role, so both must stay callable. Each reads
+            -- only the caller's own profile row and returns a boolean.
+            and p.proname not in ('is_admin', 'is_active')`,
       );
       expect(rows).toEqual([]);
     });

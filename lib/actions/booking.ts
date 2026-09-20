@@ -276,11 +276,24 @@ export async function createBooking(
   const endDate = new Date(startDate.getTime() + durationMinutes * 60_000);
 
   // Same timezone fallback as the booking page, so both see the same slots.
+  // `status` rides along on the read that was already happening.
   const { data: tutorAccount } = await supabase
     .from("profiles")
-    .select("timezone")
+    .select("timezone, status")
     .eq("id", tutorId)
     .maybeSingle();
+
+  // verification_status and the ACCOUNT status are different things. The first
+  // says an admin approved this tutor's application; the second says the
+  // account is not suspended. Checking only the first meant suspending a tutor
+  // for misconduct left them bookable — the moderation action stopped them
+  // signing in and did nothing about the marketplace, so money would still
+  // move to a tutor we had just removed. Same answer as "not approved":
+  // whether a tutor is suspended is not a student's business.
+  if (tutorAccount?.status !== "active") {
+    return { error: "This tutor is not available for booking" };
+  }
+
   const slots = await getTutorAvailableSlots({
     tutorId,
     timeZone: tutorAccount?.timezone ?? "UTC",

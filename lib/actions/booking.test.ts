@@ -101,6 +101,7 @@ function seed(
     user?: string | null;
     chargesEnabled?: boolean;
     feeBps?: number | null;
+    tutorStatus?: "active" | "suspended";
   } = {},
 ) {
   fake = createFakeSupabase(
@@ -123,7 +124,16 @@ function seed(
       bookings: [],
       subjects: [{ id: 1, name: "English" }],
       profiles: [
-        { id: TUTOR, full_name: "Tutor", role: "tutor", timezone: "Europe/Dublin" },
+        // `status` matters now: createBooking refuses a suspended tutor, and
+        // the column is NOT NULL DEFAULT 'active' in the real schema, so a
+        // fixture without it was modelling a row that cannot exist.
+        {
+          id: TUTOR,
+          full_name: "Tutor",
+          role: "tutor",
+          timezone: "Europe/Dublin",
+          status: opts.tutorStatus ?? "active",
+        },
         { id: STUDENT, full_name: "Student", role: "student", status: "active" },
       ],
       payments: [],
@@ -201,6 +211,29 @@ describe("createBooking — trust boundary (migration 0029)", () => {
     expect(res.error).toBe("Only students can book lessons");
     expect(fake.db.bookings).toHaveLength(0);
     expect(createCheckout).not.toHaveBeenCalled();
+  });
+
+  it("refuses a booking with a SUSPENDED tutor", async () => {
+    // verification_status and account status are different things. Search
+    // filtered on the first only, so suspending a tutor for misconduct left
+    // them bookable and money would still move to them.
+    seed({ tutorStatus: "suspended" });
+
+    const res = await createBooking({}, form());
+
+    expect(res.error).toBe("This tutor is not available for booking");
+    expect(fake.db.bookings).toHaveLength(0);
+    expect(createCheckout).not.toHaveBeenCalled();
+  });
+
+  it("gives a suspended tutor the same answer as an unapproved one", async () => {
+    // Whether a tutor is suspended is not a student's business.
+    seed({ tutorStatus: "suspended" });
+    const suspendedRes = await createBooking({}, form());
+    seed({ verification: "pending" });
+    const unapprovedRes = await createBooking({}, form());
+
+    expect(suspendedRes.error).toBe(unapprovedRes.error);
   });
 
   it("refuses a start time that is not one of the tutor's open slots", async () => {

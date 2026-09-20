@@ -115,6 +115,11 @@ describe("function grants", () => {
       // querying role — so it must stay callable. It reads only the caller's
       // own profile row and returns a boolean.
       "is_admin",
+      // Same shape, same reason (migration 0042). Called from the messages,
+      // reviews and favorites policies, reads only the caller's own row, and
+      // returns a boolean the caller already knows — a suspended user is told
+      // they are suspended on every page.
+      "is_active",
     ]);
 
     const result = await db.query<{ proname: string; role: string }>(
