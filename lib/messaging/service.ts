@@ -23,6 +23,15 @@ export type ConversationSummary = {
   subjectName: string | null;
 };
 
+export type ConversationListPage = {
+  conversations: ConversationSummary[];
+  page: number;
+  pageSize: number;
+  /** Total threads the caller can see, so a UI can say "1-25 of 137". */
+  total: number;
+  hasMore: boolean;
+};
+
 export type MessageDTO = {
   id: string;
   body: string;
@@ -72,56 +81,101 @@ export async function ensureConversationForBooking(params: {
   }
 }
 
-/** The caller's threads, newest activity first. RLS scopes the rows. */
-export async function listConversations(userId: string): Promise<ConversationSummary[]> {
-  const supabase = await createClient();
-
-  const { data, error } = await supabase
-    .from("conversations")
-    .select(
-      `id, booking_id, student_id, tutor_id, status, closed_reason, last_message_at,
+// `profiles!conversations_*_fkey` disambiguates the two paths from a
+// conversation to a profile; `bookings!inner` because a thread without its
+// lesson has nothing to show.
+const CONVERSATION_SELECT = `id, booking_id, student_id, tutor_id, status, closed_reason, last_message_at,
        bookings!inner(start_at, status, subjects(name)),
        student:profiles!conversations_student_id_fkey(id, full_name, avatar_url),
-       tutor:profiles!conversations_tutor_id_fkey(id, full_name, avatar_url)`,
-    )
+       tutor:profiles!conversations_tutor_id_fkey(id, full_name, avatar_url)`;
+
+/** Threads per page in the inbox. */
+export const CONVERSATION_PAGE_SIZE = 25;
+const MAX_CONVERSATION_PAGE_SIZE = 100;
+
+function toSummary(
+  row: RawConversationRow,
+  userId: string,
+  preview: string | null,
+  unreadCount: number,
+): ConversationSummary {
+  const viewerIsStudent = row.student_id === userId;
+  const counterpart = viewerIsStudent ? row.tutor : row.student;
+  return {
+    id: row.id,
+    bookingId: row.booking_id,
+    status: row.status,
+    closedReason: row.closed_reason,
+    counterpartId: counterpart?.id ?? "",
+    counterpartName: counterpart?.full_name ?? "RoyalPal user",
+    counterpartAvatarUrl: counterpart?.avatar_url ?? null,
+    lastMessageAt: row.last_message_at,
+    lastMessagePreview: preview,
+    unreadCount,
+    lessonStartAt: row.bookings.start_at,
+    lessonStatus: row.bookings.status,
+    subjectName: row.bookings.subjects?.name ?? null,
+  };
+}
+
+/**
+ * The caller's threads, newest activity first. RLS scopes the rows.
+ *
+ * Paged rather than capped. A hard `.limit(100)` is not a safety limit, it is
+ * a silent truncation: the hundred-and-first thread stops existing as far as
+ * the inbox is concerned, with nothing anywhere saying so — and for a tutor
+ * who teaches daily that is a matter of months, not years.
+ */
+export async function listConversations(
+  userId: string,
+  opts: { page?: number; pageSize?: number } = {},
+): Promise<ConversationListPage> {
+  const supabase = await createClient();
+
+  const pageSize = Math.min(
+    Math.max(opts.pageSize ?? CONVERSATION_PAGE_SIZE, 1),
+    MAX_CONVERSATION_PAGE_SIZE,
+  );
+  const page = Math.max(opts.page ?? 0, 0);
+  const from = page * pageSize;
+
+  const { data, error, count } = await supabase
+    .from("conversations")
+    .select(CONVERSATION_SELECT, { count: "exact" })
     .order("last_message_at", { ascending: false, nullsFirst: false })
-    .limit(100);
+    .range(from, from + pageSize - 1);
 
   if (error) {
     log.error("failed to list conversations", error, { userId });
-    return [];
+    return { conversations: [], page, pageSize, total: 0, hasMore: false };
   }
 
   const rows = (data ?? []) as unknown as RawConversationRow[];
-  if (rows.length === 0) return [];
+  const total = count ?? rows.length;
+  if (rows.length === 0) {
+    return { conversations: [], page, pageSize, total, hasMore: false };
+  }
 
+  const ids = rows.map((r) => r.id);
   const [unreadByConversation, previewByConversation] = await Promise.all([
-    unreadCountsFor(
-      rows.map((r) => r.id),
-      userId,
-    ),
-    lastMessagePreviews(rows.map((r) => r.id)),
+    unreadCountsFor(ids, userId),
+    lastMessagePreviews(ids),
   ]);
 
-  return rows.map((row) => {
-    const viewerIsStudent = row.student_id === userId;
-    const counterpart = viewerIsStudent ? row.tutor : row.student;
-    return {
-      id: row.id,
-      bookingId: row.booking_id,
-      status: row.status,
-      closedReason: row.closed_reason,
-      counterpartId: counterpart?.id ?? "",
-      counterpartName: counterpart?.full_name ?? "RoyalPal user",
-      counterpartAvatarUrl: counterpart?.avatar_url ?? null,
-      lastMessageAt: row.last_message_at,
-      lastMessagePreview: previewByConversation.get(row.id) ?? null,
-      unreadCount: unreadByConversation.get(row.id) ?? 0,
-      lessonStartAt: row.bookings.start_at,
-      lessonStatus: row.bookings.status,
-      subjectName: row.bookings.subjects?.name ?? null,
-    };
-  });
+  return {
+    conversations: rows.map((row) =>
+      toSummary(
+        row,
+        userId,
+        previewByConversation.get(row.id) ?? null,
+        unreadByConversation.get(row.id) ?? 0,
+      ),
+    ),
+    page,
+    pageSize,
+    total,
+    hasMore: from + rows.length < total,
+  };
 }
 
 type RawConversationRow = {
@@ -197,32 +251,123 @@ export async function unreadMessageCount(userId: string): Promise<number> {
   return count ?? 0;
 }
 
+/** Messages per page in a thread. */
+export const MESSAGE_PAGE_SIZE = 50;
+const MAX_MESSAGE_PAGE_SIZE = 200;
+
+export type ConversationPage = {
+  conversation: ConversationSummary;
+  /** Oldest-first within the page, the order a transcript reads in. */
+  messages: MessageDTO[];
+  /** Whether messages OLDER than this page exist. */
+  hasMore: boolean;
+  /** The oldest loaded message's timestamp; pass it back as `before`. */
+  nextCursor: string | null;
+};
+
+/**
+ * One thread, plus the newest page of it.
+ *
+ * Two things this deliberately does NOT do any more.
+ *
+ * It does not resolve the conversation by scanning the caller's thread list,
+ * which made that list's page size a visibility limit: a thread past it, and
+ * every brand-new thread — `last_message_at` is null until someone speaks, and
+ * nulls sort last — answered 404 while plainly existing.
+ *
+ * And it does not load the OLDEST messages. `ascending: true` with a cap reads
+ * as "the first N", but a conversation is consumed from its end: past the cap
+ * the thread appeared frozen while the composer went on accepting messages
+ * that neither party could see. Fetch newest-first, reverse for display, and
+ * hand back a cursor for the rest.
+ */
 export async function getConversation(
   conversationId: string,
   userId: string,
-): Promise<{ conversation: ConversationSummary; messages: MessageDTO[] } | null> {
-  const conversations = await listConversations(userId);
-  const conversation = conversations.find((c) => c.id === conversationId);
-  if (!conversation) return null;
-
+  opts: { before?: string; pageSize?: number } = {},
+): Promise<ConversationPage | null> {
   const supabase = await createClient();
-  const { data } = await supabase
+
+  const { data, error } = await supabase
+    .from("conversations")
+    .select(CONVERSATION_SELECT)
+    .eq("id", conversationId)
+    .maybeSingle();
+
+  if (error) {
+    log.error("failed to load conversation", error, { conversationId, userId });
+    return null;
+  }
+
+  const row = data as unknown as RawConversationRow | null;
+  if (!row) return null;
+  // RLS is the real boundary and already hides a non-participant's row. This
+  // repeats it rather than depending on it: the query is no longer filtered
+  // through the caller's own list, so the check has to be stated to survive a
+  // future policy edit.
+  if (row.student_id !== userId && row.tutor_id !== userId) return null;
+
+  const pageSize = Math.min(Math.max(opts.pageSize ?? MESSAGE_PAGE_SIZE, 1), MAX_MESSAGE_PAGE_SIZE);
+
+  // One row over the page size: the cheapest honest answer to "is there more",
+  // with no second count query.
+  let query = supabase
     .from("messages")
     .select("id, body, sender_id, read_at, created_at")
     .eq("conversation_id", conversationId)
-    .order("created_at", { ascending: true })
-    .limit(500);
+    .order("created_at", { ascending: false })
+    .limit(pageSize + 1);
 
-  const messages: MessageDTO[] = (data ?? []).map((row) => ({
-    id: row.id,
-    body: row.body,
-    senderId: row.sender_id,
-    mine: row.sender_id === userId,
-    readAt: row.read_at,
-    createdAt: row.created_at,
-  }));
+  // Keyset, not offset: a thread grows at the end while it is being read, and
+  // an offset would shift under every message that arrives mid-scroll.
+  if (opts.before) query = query.lt("created_at", opts.before);
 
-  return { conversation, messages };
+  const { data: messageRows, error: messageError } = await query;
+  if (messageError) {
+    log.error("failed to load messages", messageError, { conversationId, userId });
+    return null;
+  }
+
+  const newestFirst = messageRows ?? [];
+  const hasMore = newestFirst.length > pageSize;
+  const messages: MessageDTO[] = (hasMore ? newestFirst.slice(0, pageSize) : newestFirst)
+    .map((r) => ({
+      id: r.id,
+      body: r.body,
+      senderId: r.sender_id,
+      mine: r.sender_id === userId,
+      readAt: r.read_at,
+      createdAt: r.created_at,
+    }))
+    .reverse();
+
+  const [unread, preview] = await Promise.all([
+    unreadCountsFor([conversationId], userId),
+    // Asked for directly rather than derived from the page above: when reading
+    // an older page, the page's last message is not the thread's last message.
+    lastMessagePreview(conversationId),
+  ]);
+
+  return {
+    conversation: toSummary(row, userId, preview, unread.get(conversationId) ?? 0),
+    messages,
+    hasMore,
+    nextCursor: hasMore && messages.length > 0 ? messages[0].createdAt : null,
+  };
+}
+
+/** The newest message in one thread, for its summary line. */
+async function lastMessagePreview(conversationId: string): Promise<string | null> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("messages")
+    .select("body")
+    .eq("conversation_id", conversationId)
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  const body = data?.[0]?.body;
+  return typeof body === "string" ? body.slice(0, 140) : null;
 }
 
 /**

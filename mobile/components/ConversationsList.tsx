@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { View, Text, Pressable, Image } from "react-native";
 import { router } from "expo-router";
 import { useApi } from "@/lib/useApi";
@@ -14,7 +15,14 @@ import { formatRelativeShort, formatDateTimeIn } from "@/lib/format";
 import { spacing } from "@/lib/theme";
 import type { ConversationSummary } from "@/lib/api";
 
-type Response = { conversations: ConversationSummary[]; timezone: string };
+type Response = {
+  conversations: ConversationSummary[];
+  page: number;
+  pageSize: number;
+  total: number;
+  hasMore: boolean;
+  timezone: string;
+};
 
 /**
  * Shared by both roles' Messages tab — a conversation looks the same from
@@ -22,7 +30,12 @@ type Response = { conversations: ConversationSummary[]; timezone: string };
  */
 export function ConversationsList({ emptyMessage }: { emptyMessage: string }) {
   const palette = usePalette();
-  const state = useApi<Response>("/api/v1/conversations");
+  // Paged rather than capped. Previous/next rather than an infinite list:
+  // useApi replaces its data on every focus refresh, and an accumulator that
+  // silently resets under the reader is worse than a control they drive.
+  const [page, setPage] = useState(0);
+  const state = useApi<Response>(`/api/v1/conversations?page=${page}`, [page]);
+  const hasMore = state.data?.hasMore ?? false;
 
   return (
     <Screen refreshing={state.refreshing} onRefresh={state.refresh}>
@@ -32,7 +45,7 @@ export function ConversationsList({ emptyMessage }: { emptyMessage: string }) {
         <Loading />
       ) : state.error ? (
         <ErrorState message={state.error} onRetry={state.retryable ? state.reload : undefined} />
-      ) : (state.data?.conversations.length ?? 0) === 0 ? (
+      ) : (state.data?.conversations.length ?? 0) === 0 && page === 0 ? (
         <EmptyState title="No conversations yet" message={emptyMessage} />
       ) : (
         <View
@@ -128,6 +141,42 @@ export function ConversationsList({ emptyMessage }: { emptyMessage: string }) {
           ))}
         </View>
       )}
+
+      {page > 0 || hasMore ? (
+        <View
+          style={{
+            flexDirection: "row",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: spacing.md,
+            marginTop: spacing.lg,
+          }}
+        >
+          <Pressable
+            onPress={() => setPage((p) => Math.max(0, p - 1))}
+            disabled={page === 0}
+            accessibilityRole="button"
+            accessibilityLabel="Previous page of conversations"
+            accessibilityState={{ disabled: page === 0 }}
+            style={{ minHeight: 44, justifyContent: "center", opacity: page === 0 ? 0.35 : 1 }}
+          >
+            <Text style={{ color: palette.royal, fontWeight: "600" }}>← Previous</Text>
+          </Pressable>
+
+          <Text style={{ color: palette.muted, fontSize: 13 }}>Page {page + 1}</Text>
+
+          <Pressable
+            onPress={() => setPage((p) => p + 1)}
+            disabled={!hasMore}
+            accessibilityRole="button"
+            accessibilityLabel="Next page of conversations"
+            accessibilityState={{ disabled: !hasMore }}
+            style={{ minHeight: 44, justifyContent: "center", opacity: hasMore ? 1 : 0.35 }}
+          >
+            <Text style={{ color: palette.royal, fontWeight: "600" }}>Next →</Text>
+          </Pressable>
+        </View>
+      ) : null}
     </Screen>
   );
 }

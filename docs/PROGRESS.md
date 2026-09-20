@@ -78,15 +78,15 @@ tutor calendar reports a fetch failure as "nobody can book you" (MOB-13).
 
 ### P1 — booking, availability, messaging, reviews, admin, mobile navigation
 
-| #   | ID                                                           | Status |
-| --- | ------------------------------------------------------------ | ------ |
-| 3   | MSG-1 threads load the oldest 500, newest invisible          | QUEUED |
-| 4   | MSG-2 101st conversation and every new thread 404            | QUEUED |
-| 5   | SUP-4 reply to a resolved safeguarding ticket reaches nobody | QUEUED |
-| 6   | MOB-3 `/tutor/profile` collides with `tutor/[id]` → HTTP 500 | QUEUED |
-| 7   | MOB-6 401 mid-session is a dead end                          | QUEUED |
-| 8   | MOB-2 20 of 23 notification types deep-link nowhere          | QUEUED |
-| 9   | SUP-3 support rate limits bypassable at the write boundary   | QUEUED |
+| #   | ID                                                           | Status   |
+| --- | ------------------------------------------------------------ | -------- |
+| 3   | MSG-1 threads load the oldest 500, newest invisible          | QUEUED   |
+| 4   | MSG-2 101st conversation and every new thread 404            | **DONE** |
+| 5   | SUP-4 reply to a resolved safeguarding ticket reaches nobody | QUEUED   |
+| 6   | MOB-3 `/tutor/profile` collides with `tutor/[id]` → HTTP 500 | QUEUED   |
+| 7   | MOB-6 401 mid-session is a dead end                          | QUEUED   |
+| 8   | MOB-2 20 of 23 notification types deep-link nowhere          | QUEUED   |
+| 9   | SUP-3 support rate limits bypassable at the write boundary   | QUEUED   |
 
 ### P2 — validation, edge cases, performance, reliability, UX states
 
@@ -131,6 +131,34 @@ SUP-5, MSG-5, REV-3, MOB-12, MOB-14, MOB-15, MOB-16, MOB-17. All QUEUED.
 - **Commit:** see below.
 
 ---
+
+### MSG-1 — threads load the NEWEST messages, with a cursor for the rest · P1
+
+- **Was wrong:** `getConversation` fetched `order(created_at, ascending: true).limit(500)`
+  — the OLDEST 500. Past 500 messages the thread appeared frozen in the past
+  while the composer went on accepting messages neither party could see.
+- **Changed:** fetch newest-first with `limit(pageSize + 1)`, reverse for
+  display, and return `hasMore` plus a keyset `nextCursor`. Page size 50.
+  Keyset rather than offset because a thread grows at the end while it is being
+  read. Web gets a "Load earlier messages" link; mobile gets a button that
+  prepends pages and no longer snaps to the bottom once you are in history.
+- **Also fixed here:** a read receipt now fires only on the newest page.
+  Marking a thread read while the reader is down in its history told the other
+  person something untrue.
+
+### MSG-2 — a thread opens on its own, not by scanning a capped list · P1
+
+- **Was wrong:** `getConversation` resolved through `listConversations`, capped
+  at `.limit(100)`. The 101st thread 404'd. Worse, a brand-new thread has
+  `last_message_at = null` and nulls sort last — so the thread for a lesson
+  booked one second ago was the single least reachable thread in the inbox.
+- **Changed:** query the conversation directly by id, with an explicit
+  participant check beside the RLS one. Separately, `listConversations` is now
+  paged (`range` + exact count, 25/page) instead of capped, and web, the JSON
+  API and mobile all carry prev/next.
+- **Proof:** `lib/messaging/service.test.ts`, 8 tests. Observed 7 failed → 8
+  passed. `tests/db/messaging-authorization.test.ts` (14) still passes.
+- **Commit:** this one.
 
 ## NEEDS SHERKAM
 

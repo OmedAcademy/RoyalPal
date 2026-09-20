@@ -2,13 +2,22 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { requireProfile } from "@/lib/supabase/queries";
 import { listConversations } from "@/lib/messaging/service";
+import { SearchPagination } from "@/components/tutor/SearchPagination";
 import { formatRelativeShort, formatDateTimeIn } from "@/lib/utils/format";
 
 export const metadata: Metadata = { title: "Messages — RoyalPal" };
 
-export default async function MessagesPage() {
+export default async function MessagesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
   const profile = await requireProfile(["student", "tutor", "admin"]);
-  const conversations = await listConversations(profile.id);
+  const { page: pageParam } = await searchParams;
+  const requestedPage = Number.parseInt(pageParam ?? "0", 10);
+  const { conversations, page, pageSize, total, hasMore } = await listConversations(profile.id, {
+    page: Number.isNaN(requestedPage) ? 0 : requestedPage,
+  });
 
   return (
     <div className="flex flex-col gap-6">
@@ -20,7 +29,7 @@ export default async function MessagesPage() {
         </p>
       </div>
 
-      {conversations.length === 0 ? (
+      {conversations.length === 0 && page === 0 ? (
         <div className="border-hairline bg-surface flex flex-col gap-2 rounded-2xl border p-6">
           <p className="font-medium">No conversations yet.</p>
           <p className="text-muted text-sm">
@@ -93,6 +102,14 @@ export default async function MessagesPage() {
           ))}
         </ul>
       )}
+
+      <SearchPagination
+        page={page}
+        hasMore={hasMore}
+        total={total}
+        pageSize={pageSize}
+        label="Conversation pages"
+      />
     </div>
   );
 }

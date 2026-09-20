@@ -30,6 +30,9 @@ class Query implements PromiseLike<Result<Row[]>> {
   private filters: [string, unknown][] = [];
   private negativeFilters: [string, unknown][] = [];
   private setFilters: [string, unknown[]][] = [];
+  private nullFilters: [string, unknown][] = [];
+  private lessThanFilters: [string, unknown][] = [];
+  private rowRange: [number, number] | null = null;
   // NOT named `single`: createFakeSupabase exposes a chainable `single()`
   // METHOD by Object.assign-ing it onto the instance, which would overwrite
   // a same-named boolean field and leave it permanently truthy — making
@@ -71,6 +74,20 @@ class Query implements PromiseLike<Result<Row[]>> {
     return this;
   }
 
+  /** PostgREST `.is(col, null)` — IS NULL, not `= null`. Modelled separately
+   * from eq() because `row[c] === null` misses an absent key, and an absent
+   * key is exactly how an unread message is stored in a fixture. */
+  is(column: string, value: unknown): this {
+    this.nullFilters.push([column, value]);
+    return this;
+  }
+
+  /** Strict less-than — the keyset cursor for paging back through a thread. */
+  lt(column: string, value: unknown): this {
+    this.lessThanFilters.push([column, value]);
+    return this;
+  }
+
   /** Real sort, not a no-op: a fake that silently ignores ordering would
    * let a test claim coverage of behaviour it never exercised. */
   order(column: string, opts?: { ascending?: boolean }): this {
@@ -82,6 +99,12 @@ class Query implements PromiseLike<Result<Row[]>> {
   /** Real truncation, for the same reason. */
   limit(count: number): this {
     this.rowLimit = count;
+    return this;
+  }
+
+  /** PostgREST's inclusive row range, applied after sorting. */
+  range(from: number, to: number): this {
+    this.rowRange = [from, to];
     return this;
   }
 
@@ -106,7 +129,9 @@ class Query implements PromiseLike<Result<Row[]>> {
     return (
       this.filters.every(([c, v]) => row[c] === v) &&
       this.negativeFilters.every(([c, v]) => row[c] !== v) &&
-      this.setFilters.every(([c, vs]) => vs.includes(row[c]))
+      this.setFilters.every(([c, vs]) => vs.includes(row[c])) &&
+      this.nullFilters.every(([c, v]) => (v === null ? row[c] == null : row[c] === v)) &&
+      this.lessThanFilters.every(([c, v]) => row[c] != null && (row[c] as never) < (v as never))
     );
   }
 
@@ -136,6 +161,7 @@ class Query implements PromiseLike<Result<Row[]>> {
         });
       }
 
+      if (this.rowRange !== null) found = found.slice(this.rowRange[0], this.rowRange[1] + 1);
       if (this.rowLimit !== null) found = found.slice(0, this.rowLimit);
 
       return this.wantsSingle

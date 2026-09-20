@@ -1,5 +1,13 @@
 import { useCallback, useRef, useState } from "react";
-import { View, Text, ScrollView, KeyboardAvoidingView, Platform, TextInput } from "react-native";
+import {
+  View,
+  Text,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
+  TextInput,
+  Pressable,
+} from "react-native";
 import { useLocalSearchParams, Stack } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { api } from "@/lib/api";
@@ -9,13 +17,25 @@ import { formatTimeIn, formatDateTimeIn } from "@/lib/format";
 import { spacing, radius, MIN_TOUCH_TARGET } from "@/lib/theme";
 import type { ConversationSummary, Message } from "@/lib/api";
 
-type Response = { conversation: ConversationSummary; messages: Message[]; timezone: string };
+type Response = {
+  conversation: ConversationSummary;
+  messages: Message[];
+  hasMore: boolean;
+  nextCursor: string | null;
+  timezone: string;
+};
 
 export default function ConversationScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const palette = usePalette();
   const [draft, setDraft] = useState("");
   const scrollRef = useRef<ScrollView>(null);
+  // Pages fetched by "load earlier", oldest first. Held here rather than in
+  // useApi because useApi replaces its data on every focus refresh, and the
+  // newest page is exactly what that refresh should replace.
+  const [earlier, setEarlier] = useState<Message[]>([]);
+  const [earlierCursor, setEarlierCursor] = useState<string | null>(null);
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
 
   const state = useApi<Response>(id ? `/api/v1/conversations/${id}` : null, [id]);
 
@@ -38,6 +58,25 @@ export default function ConversationScreen() {
     }
   }
 
+  async function loadEarlier() {
+    const cursor = earlierCursor ?? state.data?.nextCursor;
+    if (!cursor || loadingEarlier) return;
+    setLoadingEarlier(true);
+    try {
+      const page = await api.get<Response>(
+        `/api/v1/conversations/${id}?before=${encodeURIComponent(cursor)}`,
+      );
+      setEarlier((current) => [...page.messages, ...current]);
+      setEarlierCursor(page.hasMore ? page.nextCursor : null);
+    } catch {
+      // Left silent on purpose: the thread the reader came for is already on
+      // screen, and a failed reach for history is not worth replacing it with
+      // an error state.
+    } finally {
+      setLoadingEarlier(false);
+    }
+  }
+
   if (state.loading) return <Loading />;
   if (state.error || !state.data) {
     return (
@@ -50,7 +89,9 @@ export default function ConversationScreen() {
     );
   }
 
-  const { conversation, messages, timezone } = state.data;
+  const { conversation, timezone } = state.data;
+  const messages = [...earlier, ...state.data.messages];
+  const moreToLoad = earlierCursor !== null || (earlier.length === 0 && state.data.hasMore);
   const closed = conversation.status === "closed";
 
   return (
@@ -64,12 +105,31 @@ export default function ConversationScreen() {
         <ScrollView
           ref={scrollRef}
           contentContainerStyle={{ padding: spacing.lg, gap: spacing.sm }}
-          onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}
+          onContentSizeChange={() => {
+            // Only while the newest page is what is on screen. Once someone
+            // has paged into history, snapping back to the bottom throws away
+            // the exact thing they just reached for.
+            if (earlier.length === 0) scrollRef.current?.scrollToEnd({ animated: false });
+          }}
         >
           <Text style={{ color: palette.muted, fontSize: 12, textAlign: "center" }}>
             {conversation.subjectName ?? "Lesson"} ·{" "}
             {formatDateTimeIn(conversation.lessonStartAt, timezone)}
           </Text>
+
+          {moreToLoad ? (
+            <Pressable
+              onPress={loadEarlier}
+              disabled={loadingEarlier}
+              accessibilityRole="button"
+              accessibilityLabel="Load earlier messages"
+              style={{ minHeight: 44, justifyContent: "center", alignItems: "center" }}
+            >
+              <Text style={{ color: palette.royal, fontWeight: "600" }}>
+                {loadingEarlier ? "Loading…" : "Load earlier messages"}
+              </Text>
+            </Pressable>
+          ) : null}
 
           {messages.length === 0 ? (
             <Text style={{ color: palette.muted, textAlign: "center", marginTop: spacing.xl }}>

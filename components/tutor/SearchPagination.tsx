@@ -15,11 +15,15 @@ export function SearchPagination({
   hasMore,
   total,
   pageSize,
+  label = "Search results pages",
 }: {
   page: number;
   hasMore: boolean;
   total: number;
   pageSize: number;
+  /** Named for what is being paged, so a screen reader hears the difference
+   * between two pagination controls on the same site. */
+  label?: string;
 }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -37,7 +41,7 @@ export function SearchPagination({
   const lastPage = Math.max(0, Math.ceil(total / pageSize) - 1);
 
   return (
-    <nav aria-label="Search results pages" className="flex items-center justify-between gap-3 pt-2">
+    <nav aria-label={label} className="flex items-center justify-between gap-3 pt-2">
       {page > 0 ? (
         <Link
           href={hrefFor(page - 1)}
