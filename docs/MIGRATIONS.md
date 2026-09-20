@@ -1,14 +1,18 @@
 # Applying migrations to production
 
-**Production is on `0027`. Migrations `0028`–`0040` are not applied.**
+**Production is on `0027`. Migrations `0028`–`0044` are not applied.**
 
 > Verify rather than trust this line: **Admin → Diagnostics** probes the
 > connected database for the table or column each late migration introduces
 > and reports which are actually present.
 
-That is thirteen migrations, and the order and the timing both matter — several
-of them will break the live site if applied before the code that goes with
-them is deployed.
+That is seventeen migrations, and the order and the timing both matter —
+several of them will break the live site if applied before the code that goes
+with them is deployed.
+
+`0028`–`0041` have a step-by-step runbook of their own in
+`deploy-0028-0041.md`, with every verification query already written. The four
+below were added after it.
 
 ---
 
@@ -150,3 +154,18 @@ those were the only two outstanding. It is kept because its pre-check and its
 seven-row verification are still correct for those two migrations, and it is
 renamed so nobody mistakes it for the whole backlog. It does **not** cover
 `0030`–`0039`. Use `supabase db push` and the verification above instead.
+
+---
+
+## Added after the `0028`–`0041` runbook
+
+| #      | What it does                                                                                                                                                            | Deploy order                                                                                                                  |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `0042` | Adds `is_active()` and requires it on messages, reviews and favourites INSERT; pins `support_messages.from_admin` to `public.is_admin()`.                               | Code first. The pinned column refuses a write that sets `from_admin` itself, which the old action did.                        |
+| `0043` | Revokes insert/update/delete on `admin_actions` from `authenticated` and `anon`, keeping SELECT.                                                                        | Either order. Every real write already goes through the service role in `logAction()`.                                        |
+| `0044` | Before-insert triggers enforcing the support rate limits (5 tickets/hour, 20 replies/hour) at the write boundary, plus `support_messages (sender_id, created_at desc)`. | Either order. The Server Action's limiter counts attempts and so refuses first; these fire only for a client that skipped it. |
+
+Rollback for all three is the same shape as the table above: `0043` and `0044`
+are undone by re-granting and by dropping the two triggers respectively, and
+neither destroys data. `0042` is permission-removing — redeploy the previous
+code **and** restore the old policy named in its header.

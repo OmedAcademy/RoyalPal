@@ -86,7 +86,7 @@ tutor calendar reports a fetch failure as "nobody can book you" (MOB-13).
 | 6   | MOB-3 `/tutor/profile` collides with `tutor/[id]` → HTTP 500 | **DONE** |
 | 7   | MOB-6 401 mid-session is a dead end                          | **DONE** |
 | 8   | MOB-2 20 of 23 notification types deep-link nowhere          | **DONE** |
-| 9   | SUP-3 support rate limits bypassable at the write boundary   | QUEUED   |
+| 9   | SUP-3 support rate limits bypassable at the write boundary   | **DONE** |
 
 ### P2 — validation, edge cases, performance, reliability, UX states
 
@@ -228,6 +228,34 @@ SUP-5, MSG-5, REV-3, MOB-12, MOB-14, MOB-15, MOB-16, MOB-17. All QUEUED.
   than by running. `npx vitest run` now covers both projects (687 tests, up
   from the 640 baseline); `--project web` or `--project mobile` runs one.
 - **Commit:** this one.
+
+### SUP-3 — support rate limits hold at the write boundary · P1
+
+- **Was wrong:** `consumeRateLimit()` enforces 5 tickets/hour and 20
+  replies/hour inside the Server Action, which is not the boundary. The anon
+  key is public by design, so a session holder POSTs straight to PostgREST and
+  never meets it — measured at 50 tickets against a documented 5/hour policy.
+  A flood path into the safeguarding queue, where burying a real report under
+  noise IS the harm.
+- **Changed:** migration **0044**, two BEFORE INSERT triggers counting the
+  caller's own recent rows. Counted from the rows rather than from
+  `rate_limits`, because consuming the same bucket would double-count every
+  honest request and silently halve the real limit. Skipped when `auth.uid()`
+  is null, so the admin console and the cron sweep are untouched. Added
+  `support_messages (sender_id, created_at desc)` — that count would otherwise
+  be a sequential scan on the table an attacker is growing. EXECUTE revoked
+  from `public` first (the 0040 lesson); firing a trigger does not check it.
+- **Why it never fires for an honest client:** the action's limiter counts
+  ATTEMPTS, this counts ROWS, so the action always refuses first with a message
+  someone can act on.
+- **Proof:** `tests/db/support-rate-limit.test.ts`, 6 tests.
+  `DB_TEST_MAX_MIGRATION=43` → 2 failed (the sixth ticket and the twenty-first
+  reply both went straight in); with 0044 → 6 passed.
+  `tests/db/function-grants.test.ts` (9) and `column-exposure.test.ts` (40)
+  still pass, so the new functions do not widen the grant surface.
+- **Commit:** this one.
+
+**P1 is now empty.**
 
 ## NEEDS SHERKAM
 
