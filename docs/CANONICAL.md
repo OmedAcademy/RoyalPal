@@ -52,8 +52,11 @@ Annotated tags, pushed with this consolidation:
 - `preserve/feat-stripe-connect-express-2026-09-16` → `548e997`
 - `preserve/claude-royalpal-wa6nzy-2026-09-20` → `ed4aee4`
 
-The old branch names are left in place. They are not a second implementation.
-Pull request #1 (`feat/stripe-connect-express`) is fully contained in `main`.
+The old branch names were deleted on 24 September 2026 after this check:
+both tips were ancestors of `main`, and each had zero commits that `main`
+did not already contain. Pull request #1 (`feat/stripe-connect-express`)
+closed because its commits are on `main`. History is the commits on `main`
+plus the preservation tags above. Do not recreate those branches.
 
 ## What was not done
 
