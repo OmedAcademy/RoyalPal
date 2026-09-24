@@ -53,13 +53,13 @@ export function AvailabilityEditor({
   }
 
   return (
-    <form action={formAction} className="flex max-w-2xl flex-col gap-4">
+    <form action={formAction} className="flex flex-col gap-4">
       <p className="text-sm text-zinc-600 dark:text-zinc-400">
         Set the hours you&apos;re open for lessons each week, in your profile time zone ({timezone}
-        ).
+        ). On a wide screen each day sits beside the next.
       </p>
 
-      <div className="flex flex-col gap-3">
+      <div className="grid items-start gap-3 lg:grid-cols-2">
         {rows.map((row) => (
           <div key={row.key} className="flex flex-wrap items-end gap-3">
             <div className="flex flex-col gap-1">
@@ -68,7 +68,7 @@ export function AvailabilityEditor({
                 name="dayOfWeek"
                 value={row.dayOfWeek}
                 onChange={(e) => updateRow(row.key, { dayOfWeek: Number(e.target.value) })}
-                className="rounded-md border border-black/15 bg-transparent px-3 py-2 dark:border-white/20"
+                className="min-h-11 rounded-md border border-black/15 bg-transparent px-3 dark:border-white/20"
               >
                 {DAY_LABELS.map((label, index) => (
                   <option key={label} value={index}>
@@ -84,7 +84,7 @@ export function AvailabilityEditor({
                 name="startTime"
                 value={row.startTime}
                 onChange={(e) => updateRow(row.key, { startTime: e.target.value })}
-                className="rounded-md border border-black/15 bg-transparent px-3 py-2 dark:border-white/20"
+                className="min-h-11 rounded-md border border-black/15 bg-transparent px-3 dark:border-white/20"
               />
             </div>
             <div className="flex flex-col gap-1">
@@ -94,13 +94,13 @@ export function AvailabilityEditor({
                 name="endTime"
                 value={row.endTime}
                 onChange={(e) => updateRow(row.key, { endTime: e.target.value })}
-                className="rounded-md border border-black/15 bg-transparent px-3 py-2 dark:border-white/20"
+                className="min-h-11 rounded-md border border-black/15 bg-transparent px-3 dark:border-white/20"
               />
             </div>
             <button
               type="button"
               onClick={() => removeRow(row.key)}
-              className="rounded-md border border-black/15 px-3 py-2 text-sm dark:border-white/20"
+              className="min-h-11 rounded-md border border-black/15 px-3 text-sm dark:border-white/20"
             >
               Remove
             </button>
@@ -111,7 +111,7 @@ export function AvailabilityEditor({
       <button
         type="button"
         onClick={addRow}
-        className="w-fit rounded-md border border-black/15 px-3 py-1.5 text-sm font-medium dark:border-white/20"
+        className="min-h-11 w-fit rounded-md border border-black/15 px-3 text-sm font-medium dark:border-white/20"
       >
         Add time range
       </button>
@@ -130,7 +130,7 @@ export function AvailabilityEditor({
       <button
         type="submit"
         disabled={pending}
-        className="bg-foreground text-background w-fit rounded-md px-4 py-2 font-medium disabled:opacity-60"
+        className="bg-foreground text-background min-h-11 w-fit rounded-md px-4 font-medium disabled:opacity-60"
       >
         {pending ? "Saving..." : "Save availability"}
       </button>

@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { requireProfile } from "@/lib/supabase/queries";
 import { listConversations } from "@/lib/messaging/service";
 import { SearchPagination } from "@/components/tutor/SearchPagination";
-import { formatRelativeShort, formatDateTimeIn } from "@/lib/utils/format";
+import { ConversationList } from "@/components/messaging/ConversationList";
 
 export const metadata: Metadata = { title: "Messages — RoyalPal" };
 
@@ -47,69 +47,41 @@ export default async function MessagesPage({
           )}
         </div>
       ) : (
-        <ul className="border-hairline bg-surface divide-y divide-[color:var(--hairline)] overflow-hidden rounded-2xl border">
-          {conversations.map((c) => (
-            <li key={c.id}>
-              <Link
-                href={`/messages/${c.id}`}
-                className="flex items-center gap-3 p-4 transition-colors hover:bg-[color:var(--hairline)]/40"
-              >
-                <div className="h-11 w-11 shrink-0 overflow-hidden rounded-full bg-[color:var(--hairline)]">
-                  {c.counterpartAvatarUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={c.counterpartAvatarUrl}
-                      alt=""
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <span
-                      aria-hidden="true"
-                      className="text-muted flex h-full w-full items-center justify-center font-semibold"
-                    >
-                      {c.counterpartName.charAt(0).toUpperCase()}
-                    </span>
-                  )}
-                </div>
-
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <p className="truncate font-medium">{c.counterpartName}</p>
-                    {c.lastMessageAt && (
-                      <span className="text-muted shrink-0 text-xs">
-                        {formatRelativeShort(c.lastMessageAt)}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-muted truncate text-sm">
-                    {c.lastMessagePreview ?? (
-                      <span className="italic">
-                        {c.subjectName ?? "Lesson"} ·{" "}
-                        {formatDateTimeIn(c.lessonStartAt, profile.timezone)}
-                      </span>
-                    )}
-                  </p>
-                </div>
-
-                {c.unreadCount > 0 && (
-                  <span className="bg-royal text-royal-contrast ml-1 shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold">
-                    {c.unreadCount > 9 ? "9+" : c.unreadCount}
-                    <span className="sr-only"> unread</span>
-                  </span>
-                )}
-              </Link>
-            </li>
-          ))}
-        </ul>
+        <>
+          <div className="md:hidden">
+            <ConversationList conversations={conversations} timeZone={profile.timezone} />
+            <SearchPagination
+              page={page}
+              hasMore={hasMore}
+              total={total}
+              pageSize={pageSize}
+              label="Conversation pages"
+            />
+          </div>
+          <div className="border-hairline bg-surface hidden flex-col gap-2 rounded-2xl border p-6 md:flex">
+            <p className="font-medium">
+              {page > 0 ? "Older conversations" : "Choose a conversation"}
+            </p>
+            <p className="text-muted text-sm">
+              {page > 0
+                ? "These threads are older than the ones in the inbox. Open one to read it."
+                : "The latest threads are listed beside this panel. Open one to read it here."}
+            </p>
+            {page > 0 ? (
+              <div className="mt-2">
+                <ConversationList conversations={conversations} timeZone={profile.timezone} />
+                <SearchPagination
+                  page={page}
+                  hasMore={hasMore}
+                  total={total}
+                  pageSize={pageSize}
+                  label="Conversation pages"
+                />
+              </div>
+            ) : null}
+          </div>
+        </>
       )}
-
-      <SearchPagination
-        page={page}
-        hasMore={hasMore}
-        total={total}
-        pageSize={pageSize}
-        label="Conversation pages"
-      />
     </div>
   );
 }

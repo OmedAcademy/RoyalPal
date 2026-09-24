@@ -180,3 +180,22 @@ test.describe("layout holds at phone width", () => {
     });
   }
 });
+
+test.describe("layout holds at tablet width", () => {
+  test.skip(
+    ({ browserName }) => browserName !== "chromium",
+    "viewport check, one engine is enough",
+  );
+
+  for (const path of ["/", "/login", "/signup", "/legal/terms"]) {
+    test(`${path} does not scroll sideways on an iPad`, async ({ page }) => {
+      await page.setViewportSize({ width: 834, height: 1112 });
+      await page.goto(path);
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      );
+      expect(overflow, `${path} overflows by ${overflow}px`).toBeLessThanOrEqual(1);
+      await expect(page).not.toHaveTitle(/Create Next App/);
+    });
+  }
+});
