@@ -61,7 +61,7 @@ plus the preservation tags above. Do not recreate those branches.
 ## What was not done
 
 - No other OmedAcademy repository was modified or deleted.
-- No database migration was applied. Production can still be behind `0028`–`0046`.
+- No database migration was applied. Production can still be behind `0028`–`0047`.
   Read `docs/MIGRATIONS.md` before touching it. Shipping this code is the step
   those migrations were waiting for; applying them is a separate, explicit step.
 - Stripe was not called.

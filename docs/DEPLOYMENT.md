@@ -17,10 +17,27 @@ Everything an operator needs, and an honest list of what is not verified.
 | Push                    | Expo Push → APNs / FCM       | Needs an EAS project id          |
 | Mobile apps             | EAS Build                    | See `docs/MOBILE.md`             |
 
-> ⚠️ **Two Vercel projects exist** — `royal-pal` and `royalpal-mvp`, both under
-> the `lingora1` team. Which one is production has not been determined from
-> inside this repository. **Confirm before deploying**, because promoting to
-> the wrong one deploys nothing useful and leaves the real site untouched.
+> ⚠️ **Two Vercel projects are connected to this repo** — `royal-pal` and
+> `royalpal-mvp`, both under the `lingora1` team.
+>
+> Checked 24 September 2026, after `main` deployed:
+>
+> - https://royal-pal.vercel.app is the public site. It serves RoyalPal, not
+>   the Next.js starter.
+> - https://royalpal-mvp.vercel.app returned `MIDDLEWARE_INVOCATION_FAILED`
+>   on the same commit. The code is identical, so the difference is that
+>   project's environment. Copy `NEXT_PUBLIC_SUPABASE_URL`,
+>   `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`,
+>   `NEXT_PUBLIC_APP_URL` and `CRON_SECRET` from `royal-pal` if that project
+>   should serve the app. There is no Vercel token in this workspace, so those
+>   values cannot be copied from here.
+>
+> If the public Supabase variables are missing, middleware no longer crashes
+> the whole site: marketing pages still render, and `/student`, `/tutor`,
+> `/admin`, `/messages`, `/settings` and `/support` redirect to sign-in.
+> Signing in still requires a real Supabase project. Do not treat
+> `royalpal-mvp` as production until those variables are set and a page behind
+> sign-in loads.
 
 ---
 

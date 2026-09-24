@@ -1,6 +1,6 @@
 # Applying migrations to production
 
-**Production is on `0027`. Migrations `0028`–`0044` are not applied.**
+**Production is on `0027`. Migrations `0028`–`0047` are not applied.**
 
 > Verify rather than trust this line: **Admin → Diagnostics** probes the
 > connected database for the table or column each late migration introduces
@@ -159,11 +159,14 @@ renamed so nobody mistakes it for the whole backlog. It does **not** cover
 
 ## Added after the `0028`–`0041` runbook
 
-| #      | What it does                                                                                                                                                            | Deploy order                                                                                                                  |
-| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `0042` | Adds `is_active()` and requires it on messages, reviews and favourites INSERT; pins `support_messages.from_admin` to `public.is_admin()`.                               | Code first. The pinned column refuses a write that sets `from_admin` itself, which the old action did.                        |
-| `0043` | Revokes insert/update/delete on `admin_actions` from `authenticated` and `anon`, keeping SELECT.                                                                        | Either order. Every real write already goes through the service role in `logAction()`.                                        |
-| `0044` | Before-insert triggers enforcing the support rate limits (5 tickets/hour, 20 replies/hour) at the write boundary, plus `support_messages (sender_id, created_at desc)`. | Either order. The Server Action's limiter counts attempts and so refuses first; these fire only for a client that skipped it. |
+| #      | What it does                                                                                                                                                                        | Deploy order                                                                                                                                                             |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `0042` | Adds `is_active()` and requires it on messages, reviews and favourites INSERT; pins `support_messages.from_admin` to `public.is_admin()`.                                           | Code first. The pinned column refuses a write that sets `from_admin` itself, which the old action did.                                                                   |
+| `0043` | Revokes insert/update/delete on `admin_actions` from `authenticated` and `anon`, keeping SELECT.                                                                                    | Either order. Every real write already goes through the service role in `logAction()`.                                                                                   |
+| `0044` | Before-insert triggers enforcing the support rate limits (5 tickets/hour, 20 replies/hour) at the write boundary, plus `support_messages (sender_id, created_at desc)`.             | Either order. The Server Action's limiter counts attempts and so refuses first; these fire only for a client that skipped it.                                            |
+| `0045` | Revokes table INSERT on support tickets and messages and re-grants only the columns a client is allowed to supply.                                                                  | Code first. A client can no longer set `status`, `assigned_admin_id`, or timestamps.                                                                                     |
+| `0046` | Stores `conversations.last_message_preview` (trigger + backfill), adds `unread_message_count()` scoped to the caller, and narrows conversation UPDATE to `(status, closed_reason)`. | Code first. The inbox reads the new column and calls the function.                                                                                                       |
+| `0047` | Exclusion constraint `bookings_no_student_overlap`: one student cannot hold two `pending_payment` or `confirmed` lessons at the same time.                                          | Either order for reads. Booking inserts that overlap an existing live lesson for that student will fail until any such rows are resolved. Uses `btree_gist` from `0001`. |
 
 Rollback for all three is the same shape as the table above: `0043` and `0044`
 are undone by re-granting and by dropping the two triggers respectively, and
