@@ -1,21 +1,17 @@
 import { Tabs } from "expo-router/tabs";
 import { useAuth } from "@/lib/auth";
-import { usePalette } from "@/components/ui";
 import { TabIcon } from "@/components/TabIcon";
+import { useAdaptiveTabScreenOptions } from "@/lib/adaptive-tabs";
 
 export default function TutorTabsLayout() {
-  const palette = usePalette();
   const { me } = useAuth();
   const unread = me?.badges.unreadMessages ?? 0;
+  const screenOptions = useAdaptiveTabScreenOptions();
 
   return (
     <Tabs
       screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: palette.royal,
-        tabBarInactiveTintColor: palette.muted,
-        tabBarStyle: { backgroundColor: palette.surface, borderTopColor: palette.hairline },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
+        ...screenOptions,
       }}
     >
       <Tabs.Screen

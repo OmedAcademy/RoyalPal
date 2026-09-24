@@ -1,7 +1,7 @@
 import { Tabs } from "expo-router/tabs";
 import { useAuth } from "@/lib/auth";
-import { usePalette } from "@/components/ui";
 import { TabIcon } from "@/components/TabIcon";
+import { useAdaptiveTabScreenOptions } from "@/lib/adaptive-tabs";
 
 /**
  * `expo-router/tabs`, not `expo-router`.
@@ -12,18 +12,14 @@ import { TabIcon } from "@/components/TabIcon";
  * cause. Verified against the installed package's own type definitions.
  */
 export default function StudentTabsLayout() {
-  const palette = usePalette();
   const { me } = useAuth();
   const unread = me?.badges.unreadMessages ?? 0;
+  const screenOptions = useAdaptiveTabScreenOptions();
 
   return (
     <Tabs
       screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: palette.royal,
-        tabBarInactiveTintColor: palette.muted,
-        tabBarStyle: { backgroundColor: palette.surface, borderTopColor: palette.hairline },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
+        ...screenOptions,
       }}
     >
       <Tabs.Screen

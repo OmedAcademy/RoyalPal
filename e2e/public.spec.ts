@@ -44,6 +44,7 @@ test.describe("public pages render", () => {
       // A page title is what a browser tab, a bookmark and a search result all
       // show. An empty one is invisible in development and embarrassing later.
       await expect(page).toHaveTitle(/\S/);
+      await expect(page).not.toHaveTitle(/Create Next App/);
 
       // Exactly one h1: assistive technology uses it as the page's name, and
       // two of them means neither is the answer to "where am I".
