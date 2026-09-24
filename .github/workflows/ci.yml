@@ -39,6 +39,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The root Vitest workspace also runs mobile/lib/**/*.test.ts. Those
+      # files sit under mobile/tsconfig.json, which extends expo/tsconfig.base.
+      # Without this install, Vite fails resolving that extend and the suite
+      # reports the mobile files as failed before any assertion runs.
+      - name: Install mobile dependencies
+        run: npm ci --prefix mobile
+
       - name: Check formatting
         run: npm run format:check
 
