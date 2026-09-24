@@ -16,6 +16,7 @@ import {
 } from "@/components/ui";
 import { Chooser, type Choice } from "@/components/Chooser";
 import { spacing, MIN_TOUCH_TARGET } from "@/lib/theme";
+import { useDiscardGuard } from "@/lib/discard-guard";
 
 type AvailabilityResponse = {
   timezone: string;
@@ -55,6 +56,7 @@ export default function EditAvailabilityScreen() {
   const state = useApi<AvailabilityResponse>("/api/v1/availability");
   const [rows, setRows] = useState<Row[]>([]);
   const [dirty, setDirty] = useState(false);
+  const allowLeave = useDiscardGuard(dirty);
 
   const loaded = state.data;
   useEffect(() => {
@@ -228,7 +230,11 @@ export default function EditAvailabilityScreen() {
       <Button
         onPress={async () => {
           const result = await save.run(rows);
-          if (result) router.back();
+          if (result) {
+            setDirty(false);
+            allowLeave();
+            router.back();
+          }
         }}
         busy={save.busy}
         disabled={problem !== null || !dirty}

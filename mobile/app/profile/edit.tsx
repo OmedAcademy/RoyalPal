@@ -17,6 +17,7 @@ import {
 } from "@/components/ui";
 import { Chooser, type Choice } from "@/components/Chooser";
 import { spacing } from "@/lib/theme";
+import { useDiscardGuard } from "@/lib/discard-guard";
 
 type Reference = {
   languages: { value: string; label: string }[];
@@ -88,6 +89,15 @@ export default function EditProfileScreen() {
   const [availabilityNote, setAvailabilityNote] = useState("");
   const [videoUrl, setVideoUrl] = useState("");
   const [subjectIds, setSubjectIds] = useState<string[]>([]);
+  const [dirty, setDirty] = useState(false);
+  const allowLeave = useDiscardGuard(dirty);
+
+  const edit =
+    <T,>(setter: (value: T) => void) =>
+    (value: T) => {
+      setDirty(true);
+      setter(value);
+    };
 
   const loaded = profileState.data;
 
@@ -124,6 +134,7 @@ export default function EditProfileScreen() {
       setEnglishLevel(str(role, "english_level") ? [str(role, "english_level")] : []);
       setLearningGoals(str(role, "learning_goals"));
     }
+    setDirty(false);
   }, [loaded]);
 
   const save = useMutation(async (body: Record<string, unknown>) =>
@@ -197,6 +208,8 @@ export default function EditProfileScreen() {
 
     const result = await save.run(body);
     if (!result) return;
+    setDirty(false);
+    allowLeave();
     // The name and time zone shown elsewhere in the app come from the auth
     // context, which is now a version behind.
     await refresh();
@@ -209,12 +222,17 @@ export default function EditProfileScreen() {
       <Heading>Edit profile</Heading>
 
       <Card>
-        <Field label="Full name" value={fullName} onChangeText={setFullName} maxLength={200} />
+        <Field
+          label="Full name"
+          value={fullName}
+          onChangeText={edit(setFullName)}
+          maxLength={200}
+        />
         <Chooser
           label="Country"
           choices={reference.countries}
           selected={country}
-          onChange={setCountry}
+          onChange={edit(setCountry)}
           placeholder="Choose a country"
         />
         <Chooser
@@ -222,7 +240,7 @@ export default function EditProfileScreen() {
           hint="Lesson times are shown in this zone everywhere in RoyalPal."
           choices={timezoneChoices}
           selected={timezone}
-          onChange={setTimezone}
+          onChange={edit(setTimezone)}
           placeholder="Choose a time zone"
         />
       </Card>
@@ -234,15 +252,15 @@ export default function EditProfileScreen() {
             <Field
               label="Headline"
               value={headline}
-              onChangeText={setHeadline}
+              onChangeText={edit(setHeadline)}
               maxLength={150}
               hint="One line. It sits under your name in search."
             />
-            <Field label="Bio" value={bio} onChangeText={setBio} multiline maxLength={5000} />
+            <Field label="Bio" value={bio} onChangeText={edit(setBio)} multiline maxLength={5000} />
             <Field
               label="Intro video URL"
               value={videoUrl}
-              onChangeText={setVideoUrl}
+              onChangeText={edit(setVideoUrl)}
               autoCapitalize="none"
               keyboardType="url"
               hint="Optional. Must start with http:// or https://"
@@ -256,7 +274,7 @@ export default function EditProfileScreen() {
               multiple
               choices={subjectChoices}
               selected={subjectIds}
-              onChange={setSubjectIds}
+              onChange={edit(setSubjectIds)}
               placeholder="Choose subjects"
             />
             <Chooser
@@ -264,7 +282,7 @@ export default function EditProfileScreen() {
               multiple
               choices={reference.languages}
               selected={teachingLanguages}
-              onChange={setTeachingLanguages}
+              onChange={edit(setTeachingLanguages)}
               placeholder="Choose languages"
             />
             <Chooser
@@ -272,7 +290,7 @@ export default function EditProfileScreen() {
               multiple
               choices={reference.languages}
               selected={languagesSpoken}
-              onChange={setLanguagesSpoken}
+              onChange={edit(setLanguagesSpoken)}
               placeholder="Choose languages"
             />
             <Chooser
@@ -280,7 +298,7 @@ export default function EditProfileScreen() {
               multiple
               choices={reference.specializations.map((value) => ({ value, label: value }))}
               selected={specializations}
-              onChange={setSpecializations}
+              onChange={edit(setSpecializations)}
               placeholder="Choose specializations"
             />
           </Card>
@@ -290,21 +308,21 @@ export default function EditProfileScreen() {
             <Field
               label="Years of experience"
               value={yearsExperience}
-              onChangeText={setYearsExperience}
+              onChangeText={edit(setYearsExperience)}
               keyboardType="number-pad"
               hint="Optional."
             />
             <Field
               label="Certifications"
               value={certifications}
-              onChangeText={setCertifications}
+              onChangeText={edit(setCertifications)}
               multiline
               hint="One per line."
             />
             <Field
               label="Education"
               value={education}
-              onChangeText={setEducation}
+              onChangeText={edit(setEducation)}
               multiline
               maxLength={2000}
             />
@@ -315,21 +333,21 @@ export default function EditProfileScreen() {
             <Field
               label="Hourly price"
               value={hourlyPrice}
-              onChangeText={setHourlyPrice}
+              onChangeText={edit(setHourlyPrice)}
               keyboardType="decimal-pad"
               hint="Per hour, before RoyalPal's commission."
             />
             <Field
               label="Trial lesson price"
               value={trialPrice}
-              onChangeText={setTrialPrice}
+              onChangeText={edit(setTrialPrice)}
               keyboardType="decimal-pad"
               hint="Optional. Leave blank if you don't offer trials."
             />
             <Field
               label="Availability note"
               value={availabilityNote}
-              onChangeText={setAvailabilityNote}
+              onChangeText={edit(setAvailabilityNote)}
               multiline
               maxLength={500}
               hint="Optional. Anything your calendar can't say."
@@ -343,7 +361,7 @@ export default function EditProfileScreen() {
             label="Native language"
             choices={reference.languages}
             selected={nativeLanguage}
-            onChange={setNativeLanguage}
+            onChange={edit(setNativeLanguage)}
             placeholder="Choose a language"
           />
           <Chooser
@@ -351,20 +369,20 @@ export default function EditProfileScreen() {
             multiple
             choices={reference.languages}
             selected={targetLanguages}
-            onChange={setTargetLanguages}
+            onChange={edit(setTargetLanguages)}
             placeholder="Choose languages"
           />
           <Chooser
             label="English level"
             choices={reference.englishLevels}
             selected={englishLevel}
-            onChange={setEnglishLevel}
+            onChange={edit(setEnglishLevel)}
             placeholder="Choose a level"
           />
           <Field
             label="Learning goals"
             value={learningGoals}
-            onChangeText={setLearningGoals}
+            onChangeText={edit(setLearningGoals)}
             multiline
             maxLength={2000}
             hint="Tutors see this when you book."
