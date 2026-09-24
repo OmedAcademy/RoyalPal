@@ -22,6 +22,17 @@ const PROTECTED_PREFIXES = {
  */
 const AUTHENTICATED_PREFIXES = ["/messages", "/settings", "/support"] as const;
 
+/** True when this path must not render for an anonymous visitor. */
+export function pathRequiresSession(pathname: string): boolean {
+  const matchedPrefix = (
+    Object.keys(PROTECTED_PREFIXES) as (keyof typeof PROTECTED_PREFIXES)[]
+  ).some((role) => pathname.startsWith(PROTECTED_PREFIXES[role]));
+  const needsAnyRole = AUTHENTICATED_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+  return matchedPrefix || needsAnyRole;
+}
+
 /**
  * The one authenticated area a SUSPENDED account may still reach.
  *
@@ -39,28 +50,57 @@ const SUSPENDED_ALLOWED_PREFIXES = ["/support"] as const;
  * route prefixes. This is defense-in-depth's first layer; each protected
  * page also re-checks server-side in case middleware is ever bypassed or
  * misconfigured.
+ *
+ * A deployment with no public Supabase env (or a client that throws) must
+ * not take down the marketing site. Protected paths fail closed — they
+ * bounce to sign-in — and everything else renders.
  */
 export async function updateSession(request: NextRequest) {
+  const path = request.nextUrl.pathname;
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+
+  if (!supabaseUrl || !anonKey) {
+    return responseWhenAuthUnavailable(request, path);
+  }
+
+  try {
+    return await refreshAndGate(request, supabaseUrl, anonKey);
+  } catch (err) {
+    console.error(
+      "[middleware] session refresh failed",
+      err instanceof Error ? err.name : "unknown",
+    );
+    return responseWhenAuthUnavailable(request, path);
+  }
+}
+
+function responseWhenAuthUnavailable(request: NextRequest, path: string) {
+  if (!pathRequiresSession(path)) {
+    return NextResponse.next({ request });
+  }
+  const loginUrl = new URL("/login", request.url);
+  loginUrl.searchParams.set("redirectTo", path);
+  return NextResponse.redirect(loginUrl);
+}
+
+async function refreshAndGate(request: NextRequest, supabaseUrl: string, anonKey: string) {
   let response = NextResponse.next({ request });
 
-  const supabase = createServerClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-          response = NextResponse.next({ request });
-          cookiesToSet.forEach(({ name, value, options }) =>
-            response.cookies.set(name, value, options),
-          );
-        },
+  const supabase = createServerClient<Database>(supabaseUrl, anonKey, {
+    cookies: {
+      getAll() {
+        return request.cookies.getAll();
+      },
+      setAll(cookiesToSet) {
+        cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
+        response = NextResponse.next({ request });
+        cookiesToSet.forEach(({ name, value, options }) =>
+          response.cookies.set(name, value, options),
+        );
       },
     },
-  );
+  });
 
   // IMPORTANT: do not run any code between createServerClient and
   // getUser() — it revalidates the session token and must run on every
