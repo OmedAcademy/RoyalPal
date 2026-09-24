@@ -83,6 +83,7 @@ Security → column-lock triggers.
 | [`docs/MIGRATIONS.md`](docs/MIGRATIONS.md)                                       | **Read before touching production's database**       |
 | [`docs/MOBILE.md`](docs/MOBILE.md)                                               | The iOS and Android apps, builds, store readiness    |
 | [`docs/STRIPE_STATUS.md`](docs/STRIPE_STATUS.md)                                 | Where payments stand, and what surprises await       |
+| [`docs/STRIPE_GO_LIVE.md`](docs/STRIPE_GO_LIVE.md)                               | The steps a person still has to do in Stripe         |
 | [`docs/STRIPE_TEST_MODE_VERIFICATION.md`](docs/STRIPE_TEST_MODE_VERIFICATION.md) | Turning "tested against mocks" into "verified"       |
 | [`docs/RECONCILIATION_DESIGN.md`](docs/RECONCILIATION_DESIGN.md)                 | Designed, deliberately not built yet                 |
 

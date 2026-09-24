@@ -95,14 +95,17 @@ thing as a secret in a client binary.
 
 ## Scheduled jobs
 
-| Path                         | Schedule        | Does                                                                            |
-| ---------------------------- | --------------- | ------------------------------------------------------------------------------- |
-| `/api/cron/lesson-lifecycle` | every 10 min    | Completes finished lessons; releases unpaid bookings                            |
-| `/api/cron/reminders`        | every 15 min    | Lesson reminders ~1 hour ahead                                                  |
-| `/api/cron/maintenance`      | daily 03:20 UTC | Closes old conversations, prunes rate limits, carries out due account deletions |
+| Path                         | Schedule        | Does                                                                                                                                             |
+| ---------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/api/cron/lesson-lifecycle` | daily 02:10 UTC | Completes finished lessons; releases unpaid bookings. Also runs on booking reads and writes, because Hobby cron cannot run more than once a day. |
+| `/api/cron/reminders`        | daily 08:10 UTC | Reminds both people about confirmed lessons starting in the next 24 hours.                                                                       |
+| `/api/cron/maintenance`      | daily 03:20 UTC | Closes old conversations, prunes rate limits, carries out due account deletions.                                                                 |
 
-All three are idempotent — each `WHERE` clause is the condition being fixed, so
-re-running finds nothing to do. Safe to retry, safe to run concurrently.
+All three are idempotent. Hobby accounts reject any cron that would run more
+than once a day, which is why these schedules are daily. Unpaid holds and
+lesson completion also run when someone loads or creates a booking, so a
+45-minute checkout hold does not wait until 02:10 UTC. A lesson booked after
+the 08:10 reminder run is not reminded until the next morning.
 
 Auth **fails closed**: with no `CRON_SECRET` set, every job returns 503 rather
 than running. That is the opposite of the rate limiter's behaviour, and
