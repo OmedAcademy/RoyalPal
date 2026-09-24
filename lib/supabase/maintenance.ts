@@ -1,22 +1,21 @@
 import "server-only";
+import { advanceLessonLifecycle } from "@/lib/booking/lifecycle";
+import { logger } from "@/lib/observability/logger";
+import { createAdminClient } from "@/lib/supabase/admin";
+
+const log = logger.child({ component: "booking-maintenance" });
 
 /**
- * DELIBERATELY EMPTY. The booking maintenance sweep now runs as a scheduled
- * job: app/api/cron/lesson-lifecycle.
+ * Runs the lesson clock on a request that is about to show or take a slot.
  *
- * What was here ran platform-wide UPDATEs whenever somebody happened to load a
- * bookings page, throttled by a module-level variable. On Vercel that variable
- * is per-lambda-instance, so the throttle enforced nothing under load and the
- * sweep did not run at all when traffic was quiet. Since reviews require a
- * completed lesson, "nobody visited this weekend" silently meant "nobody can
- * review".
- *
- * This shim stays so the call site keeps compiling while the cron beds in, and
- * so anyone who goes looking for the old behaviour finds this explanation
- * rather than a deleted file. It should be removed along with its one caller
- * in lib/supabase/bookings.ts once the schedule is confirmed running in
- * production.
+ * Failures are logged and swallowed here on purpose. A sweep that cannot
+ * reach the database must not take the bookings page down with it; the cron
+ * route does not swallow, so a broken job is still visible there.
  */
 export async function runBookingMaintenance(): Promise<void> {
-  // Intentionally a no-op.
+  try {
+    await advanceLessonLifecycle(createAdminClient());
+  } catch (err) {
+    log.error("lesson lifecycle sweep failed", err);
+  }
 }

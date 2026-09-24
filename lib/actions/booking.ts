@@ -26,6 +26,7 @@ import {
   FREE_CANCELLATION_HOURS,
 } from "@/lib/booking/cancellation-policy";
 import { refundBookingPayment } from "@/lib/stripe/refunds";
+import { advanceLessonLifecycle } from "@/lib/booking/lifecycle";
 import { consumeRateLimit, rateLimitMessage } from "@/lib/rate-limit/limiter";
 import type { Database } from "@/types/database";
 
@@ -82,6 +83,13 @@ async function startCheckout(
       .maybeSingle(),
   ]);
 
+  const admin = createAdminClient();
+  const { data: priorPayment } = await admin
+    .from("payments")
+    .select("checkout_session_id, status")
+    .eq("booking_id", booking.id)
+    .maybeSingle();
+
   const session = await createBookingCheckoutSession({
     bookingId: booking.id,
     tutorId: booking.tutor_id,
@@ -95,6 +103,8 @@ async function startCheckout(
     tutorName: tutor?.full_name ?? "your tutor",
     platformFeeCents: booking.platform_fee_cents,
     tutorStripeAccountId: tutorProfile?.stripe_account_id ?? null,
+    previousSessionId:
+      priorPayment && priorPayment.status !== "succeeded" ? priorPayment.checkout_session_id : null,
   });
 
   if (!session.url) {
@@ -131,7 +141,6 @@ async function startCheckout(
     paid_at: null,
   };
 
-  const admin = createAdminClient();
   const { data: updated, error: updateError } = await admin
     .from("payments")
     .update(attempt)
@@ -194,6 +203,15 @@ export async function createBooking(
   }
   const user = auth.user;
 
+  // Release holds whose Checkout Session has already died, before this
+  // request decides which slots are free. Hobby cron is daily; this is the
+  // path that actually frees a slot inside the 45-minute grace window.
+  try {
+    await advanceLessonLifecycle(createAdminClient());
+  } catch (err) {
+    log.error("lesson lifecycle sweep failed", err);
+  }
+
   const createLimit = await consumeRateLimit("createBooking", user.id);
   if (!createLimit.allowed) return { error: rateLimitMessage(createLimit) };
 
@@ -201,7 +219,10 @@ export async function createBooking(
   // impossible. Refuse up front rather than creating a booking row and
   // immediately cancelling it when checkout fails.
   if (!isStripeConfigured()) {
-    return { error: "Booking is temporarily unavailable. Please try again later." };
+    return {
+      error:
+        "Payments are not yet enabled. You can keep browsing; checkout opens once payments are turned on.",
+    };
   }
 
   // Service role, because platform_fee_bps is the tutor's negotiated
@@ -411,7 +432,10 @@ export async function retryBookingPayment(
   const { bookingId } = parsed.data;
 
   if (!isStripeConfigured()) {
-    return { error: "Payment is temporarily unavailable. Please try again later." };
+    return {
+      error:
+        "Payments are not yet enabled. You can keep browsing; checkout opens once payments are turned on.",
+    };
   }
 
   const supabase = await createClient();
@@ -462,6 +486,9 @@ export async function retryBookingPayment(
   try {
     checkoutUrl = await startCheckout(supabase, booking);
   } catch (err) {
+    if (err instanceof Error && err.name === "CheckoutAlreadyPaidError") {
+      return { message: "This booking is already paid — no further payment is needed." };
+    }
     log.error("failed to restart checkout", err, { bookingId });
     return { error: "We couldn't start checkout. Please try again." };
   }
