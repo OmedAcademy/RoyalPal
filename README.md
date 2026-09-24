@@ -4,6 +4,11 @@ A global tutoring marketplace — students discover tutors, book and pay for les
 
 **Teach Without Borders. Learn Without Limits.**
 
+> **Canonical repository.** [OmedAcademy/RoyalPal](https://github.com/OmedAcademy/RoyalPal)
+> on `main` is the only RoyalPal codebase. There is no second repository.
+> [`docs/CANONICAL.md`](docs/CANONICAL.md) records how `main` was fast-forwarded
+> to the full implementation on 24 September 2026.
+
 RoyalPal runs on the **web, iOS and Android** from one backend.
 
 ---
@@ -73,6 +78,7 @@ Security → column-lock triggers.
 
 | Document                                                                         | For                                                  |
 | -------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| [`docs/CANONICAL.md`](docs/CANONICAL.md)                                         | Which repository and branch are RoyalPal             |
 | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)                                       | Deploying, env vars, cron, rollback, troubleshooting |
 | [`docs/MIGRATIONS.md`](docs/MIGRATIONS.md)                                       | **Read before touching production's database**       |
 | [`docs/MOBILE.md`](docs/MOBILE.md)                                               | The iOS and Android apps, builds, store readiness    |
