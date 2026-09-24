@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { NotificationService } from "@/lib/notifications/service";
 import { bookingIdFromTransferGroup, isRoyalPalMetadata } from "@/lib/stripe/app-metadata";
 import { MeetingService } from "@/lib/meet/service";
+import { refundBookingPayment } from "@/lib/stripe/refunds";
 import { logger } from "@/lib/observability/logger";
 import type { Database, Json } from "@/types/database";
 
@@ -104,6 +105,36 @@ function extractPaymentIntentId(
 }
 
 /**
+ * A payment that lands after the hold was released must not stay captured.
+ * The booking is already cancelled, so confirming it would fight the status
+ * trigger. Refund instead, with a stable idempotency key so Stripe's retry
+ * of this event cannot refund twice.
+ */
+async function refundIfBookingWasCancelled(
+  admin: AdminClient,
+  bookingId: string,
+  paymentIntentId: string,
+): Promise<void> {
+  const { data: booking, error } = await admin
+    .from("bookings")
+    .select("status")
+    .eq("id", bookingId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (booking?.status !== "cancelled") return;
+
+  log.error("payment succeeded for a cancelled booking; refunding", undefined, {
+    bookingId,
+    paymentIntentId,
+  });
+  await refundBookingPayment({
+    paymentIntentId,
+    idempotencyKey: `royalpal_cancel_refund_${paymentIntentId}`,
+  });
+}
+
+/**
  * Records a successful payment and confirms the booking, idempotently.
  *
  * Upserts on booking_id rather than requiring the payment row to already
@@ -132,7 +163,12 @@ async function markPaymentSucceeded(
     .maybeSingle();
 
   if (existing?.status === "succeeded") {
+    await refundIfBookingWasCancelled(admin, params.bookingId, params.paymentIntentId);
     return;
+  }
+
+  if (params.amountCents <= 0) {
+    throw new Error("refusing to record a payment with no positive amount");
   }
 
   const payload: Database["public"]["Tables"]["payments"]["Insert"] = {
@@ -151,7 +187,7 @@ async function markPaymentSucceeded(
 
   if (paymentError) {
     log.error("failed to record successful payment", paymentError, { bookingId: params.bookingId });
-    return;
+    throw paymentError;
   }
 
   const { data: booking } = await admin
@@ -159,6 +195,11 @@ async function markPaymentSucceeded(
     .select("status, student_id, tutor_id")
     .eq("id", params.bookingId)
     .maybeSingle();
+
+  if (booking?.status === "cancelled") {
+    await refundIfBookingWasCancelled(admin, params.bookingId, params.paymentIntentId);
+    return;
+  }
 
   if (booking?.status === "pending_payment") {
     const { error: confirmError } = await admin
@@ -169,7 +210,7 @@ async function markPaymentSucceeded(
 
     if (confirmError) {
       log.error("failed to confirm booking", confirmError, { bookingId: params.bookingId });
-      return;
+      throw confirmError;
     }
 
     // Create the live classroom on the pending→confirmed transition only, so
@@ -219,11 +260,15 @@ export async function handleCheckoutSessionCompleted(
     return;
   }
 
+  if (session.amount_total == null || session.amount_total <= 0) {
+    throw new Error("checkout.session.completed had no positive amount");
+  }
+
   await markPaymentSucceeded(createAdminClient(), {
     bookingId,
     paymentIntentId,
     checkoutSessionId: session.id,
-    amountCents: session.amount_total ?? 0,
+    amountCents: session.amount_total,
     currency: session.currency ?? "usd",
   });
 }
@@ -233,6 +278,10 @@ export async function handlePaymentIntentSucceeded(
 ): Promise<void> {
   const bookingId = bookingIdFromMetadata(paymentIntent.metadata);
   if (!bookingId) return;
+
+  if (paymentIntent.amount <= 0) {
+    throw new Error("payment_intent.succeeded had no positive amount");
+  }
 
   await markPaymentSucceeded(createAdminClient(), {
     bookingId,
@@ -290,6 +339,7 @@ export async function handlePaymentIntentFailed(
       bookingId,
       paymentIntentId: paymentIntent.id,
     });
+    throw error;
   }
 
   const { data: booking } = await admin
@@ -330,6 +380,7 @@ export async function handleCheckoutSessionExpired(
       bookingId,
       sessionId: session.id,
     });
+    throw paymentError;
   }
 
   // Only release the slot if the booking is still waiting on this exact
@@ -348,6 +399,7 @@ export async function handleCheckoutSessionExpired(
       bookingId,
       sessionId: session.id,
     });
+    throw cancelError;
   }
 }
 

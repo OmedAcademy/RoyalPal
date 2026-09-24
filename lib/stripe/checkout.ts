@@ -88,7 +88,13 @@ export async function createBookingCheckoutSession(params: {
    * anything client-supplied — so a destination charge can only ever route
    * to the account WE already associate with this specific tutor. */
   tutorStripeAccountId: string | null;
+  /** Open session this attempt replaces. Expired before a new one is created
+   * so two Checkout pages cannot both take money for one booking. */
+  previousSessionId?: string | null;
 }) {
+  if (params.previousSessionId) {
+    await expireReplacedCheckoutSession(params.previousSessionId);
+  }
   const metadata: BookingCheckoutMetadata = {
     booking_id: params.bookingId,
     tutor_id: params.tutorId,
@@ -152,4 +158,28 @@ export async function createBookingCheckoutSession(params: {
     success_url: `${appUrl}/student/bookings?payment=success`,
     cancel_url: `${appUrl}/api/stripe/checkout-cancelled?booking_id=${params.bookingId}`,
   });
+}
+
+/**
+ * A retry must close the session it replaces. Stripe keeps an open session
+ * payable until it expires (30 minutes here). Replacing only our ledger row
+ * leaves the old page able to charge.
+ *
+ * A session that is already complete means money has moved. Opening another
+ * one would be a second charge, so that case throws instead of continuing.
+ * An already-expired session is the success case of this function.
+ */
+export async function expireReplacedCheckoutSession(sessionId: string): Promise<void> {
+  try {
+    await getStripe().checkout.sessions.expire(sessionId);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "";
+    if (/status of `expired`/i.test(message)) return;
+    if (/status of `complete`/i.test(message)) {
+      const paid = new Error("This booking is already paid");
+      paid.name = "CheckoutAlreadyPaidError";
+      throw paid;
+    }
+    throw err;
+  }
 }

@@ -21,14 +21,19 @@ import { appMetadata } from "@/lib/stripe/app-metadata";
  */
 export async function refundBookingPayment(params: {
   paymentIntentId: string;
+  /** Same key on a retry returns the original refund instead of a second one. */
+  idempotencyKey?: string;
 }): Promise<Stripe.Refund> {
   const stripe = getStripe();
   const paymentIntent = await stripe.paymentIntents.retrieve(params.paymentIntentId);
   const hasTransfer = Boolean(paymentIntent.transfer_data?.destination);
 
-  return stripe.refunds.create({
-    payment_intent: params.paymentIntentId,
-    ...(hasTransfer ? { reverse_transfer: true, refund_application_fee: true } : {}),
-    metadata: appMetadata(),
-  });
+  return stripe.refunds.create(
+    {
+      payment_intent: params.paymentIntentId,
+      ...(hasTransfer ? { reverse_transfer: true, refund_application_fee: true } : {}),
+      metadata: appMetadata(),
+    },
+    params.idempotencyKey ? { idempotencyKey: params.idempotencyKey } : undefined,
+  );
 }

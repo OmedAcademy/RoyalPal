@@ -11,9 +11,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  */
 
 const create = vi.fn();
+const expire = vi.fn();
 
 vi.mock("@/lib/stripe/client", () => ({
-  getStripe: () => ({ checkout: { sessions: { create } } }),
+  getStripe: () => ({ checkout: { sessions: { create, expire } } }),
 }));
 
 const { createBookingCheckoutSession } = await import("@/lib/stripe/checkout");
@@ -43,6 +44,7 @@ const args = () => create.mock.calls[0][0];
 
 beforeEach(() => {
   create.mockReset();
+  expire.mockReset();
   create.mockResolvedValue({ id: "cs_1", url: "https://checkout.test/x" });
   process.env.NEXT_PUBLIC_APP_URL = "https://royalpal.test";
 });
@@ -159,6 +161,23 @@ describe("Connect destination charges", () => {
 
     expect(args().payment_intent_data.application_fee_amount).toBe(1500);
     expect(args().line_items[0].price_data.unit_amount).toBe(9999);
+  });
+
+  it("expires the session a retry replaces before opening another", async () => {
+    expire.mockResolvedValue({ id: "cs_old" });
+    await createBookingCheckoutSession({ ...params, previousSessionId: "cs_old" });
+    expect(expire).toHaveBeenCalledWith("cs_old");
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a second session when the one it would replace is already paid", async () => {
+    expire.mockRejectedValue(
+      new Error("This Checkout Session has a status of `complete` and cannot be expired"),
+    );
+    await expect(
+      createBookingCheckoutSession({ ...params, previousSessionId: "cs_paid" }),
+    ).rejects.toMatchObject({ name: "CheckoutAlreadyPaidError" });
+    expect(create).not.toHaveBeenCalled();
   });
 });
 

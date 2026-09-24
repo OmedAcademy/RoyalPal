@@ -819,7 +819,9 @@ describe("graceful degradation when Stripe is not configured", () => {
 
     const res = await createBooking({}, form());
 
-    expect(res.error).toBe("Booking is temporarily unavailable. Please try again later.");
+    expect(res.error).toBe(
+      "Payments are not yet enabled. You can keep browsing; checkout opens once payments are turned on.",
+    );
     // The guard runs before the insert precisely so there is no orphan
     // pending_payment booking to cancel afterwards.
     expect(fake.db.bookings).toHaveLength(0);
@@ -833,7 +835,9 @@ describe("graceful degradation when Stripe is not configured", () => {
 
     const res = await retryBookingPayment({}, fd);
 
-    expect(res.error).toBe("Payment is temporarily unavailable. Please try again later.");
+    expect(res.error).toBe(
+      "Payments are not yet enabled. You can keep browsing; checkout opens once payments are turned on.",
+    );
     expect(createCheckout).not.toHaveBeenCalled();
   });
 
