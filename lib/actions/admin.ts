@@ -118,7 +118,10 @@ export async function setTutorVerification(
     })
     .eq("id", parsed.data.tutorId);
 
-  if (error) return { error: error.message };
+  if (error) {
+    log.error("tutor verification update failed", error, { tutorId: parsed.data.tutorId });
+    return { error: "Couldn't update that tutor. Please try again." };
+  }
 
   await logAction(auth.adminId, `tutor_verification:${parsed.data.status}`, parsed.data.tutorId);
 
@@ -178,7 +181,10 @@ export async function setUserStatus(
     .update({ status: parsed.data.status })
     .eq("id", parsed.data.userId);
 
-  if (error) return { error: error.message };
+  if (error) {
+    log.error("account status update failed", error, { userId: parsed.data.userId });
+    return { error: "Couldn't update that account. Please try again." };
+  }
 
   // Writing the column is not enough. A suspended account keeps a valid,
   // refreshable JWT, and the anon key is public by design — so before

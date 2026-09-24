@@ -331,6 +331,19 @@ describe("createBooking — trust boundary (migration 0029)", () => {
     expect(createCheckout).not.toHaveBeenCalled();
   });
 
+  it("tells the student when the overlap is their own other lesson", async () => {
+    fake.control.insertError = {
+      code: "23P01",
+      message: 'conflicting key value violates exclusion constraint "bookings_no_student_overlap"',
+    };
+
+    const res = await createBooking({}, form());
+
+    expect(res.error).toBe("You already have a lesson at that time. Pick another slot.");
+    expect(res.error).not.toContain("exclusion constraint");
+    expect(createCheckout).not.toHaveBeenCalled();
+  });
+
   it("never shows the raw database message when the tutor's rate changed mid-booking (42501)", async () => {
     fake.control.insertError = {
       code: "42501",

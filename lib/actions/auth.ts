@@ -18,6 +18,23 @@ import type { UserRole } from "@/types/database";
 
 const log = logger.child({ component: "auth-action" });
 
+/**
+ * GoTrue writes its own messages for the person filling in the form
+ * ("Invalid login credentials", "Password should be at least…"). A database
+ * trigger that fails the same call does not — its text is a Postgres error,
+ * and that must not land under the form.
+ */
+function authErrorForUser(message: string, fallback: string): string {
+  if (
+    /violat|syntax error|relation |column |sqlstate|duplicate key|postgres|permission denied|database error/i.test(
+      message,
+    )
+  ) {
+    return fallback;
+  }
+  return message;
+}
+
 export type AuthActionState = {
   error?: string;
   message?: string;
@@ -84,7 +101,9 @@ export async function signup(
     if (/aged 18/i.test(error.message)) {
       return { error: "RoyalPal is only available to users aged 18 and over." };
     }
-    return { error: error.message };
+    return {
+      error: authErrorForUser(error.message, "We couldn't create that account. Please try again."),
+    };
   }
 
   // Email confirmation is required by the project's Auth settings: no
@@ -116,7 +135,9 @@ export async function login(
   const { data, error } = await supabase.auth.signInWithPassword(parsed.data);
 
   if (error) {
-    return { error: error.message };
+    return {
+      error: authErrorForUser(error.message, "We couldn't sign you in. Please try again."),
+    };
   }
 
   const { data: profile, error: profileError } = await supabase
@@ -222,7 +243,11 @@ export async function updatePassword(
   }
 
   const { error } = await supabase.auth.updateUser({ password: parsed.data.password });
-  if (error) return { error: error.message };
+  if (error) {
+    return {
+      error: authErrorForUser(error.message, "We couldn't update that password. Please try again."),
+    };
+  }
 
   // Sign every other session out. A password reset is the standard response to
   // "someone else may be in my account", and leaving that someone signed in

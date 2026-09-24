@@ -357,6 +357,15 @@ export async function createBooking(
 
   if (insertError) {
     if (insertError.code === EXCLUSION_VIOLATION) {
+      const constraintText = [insertError.message, insertError.details, insertError.hint]
+        .filter(Boolean)
+        .join(" ");
+      // Two different constraints share SQLSTATE 23P01. The tutor one means
+      // someone else took the slot; the student one means this caller already
+      // holds a lesson then. Saying "someone else" for the second is a lie.
+      if (constraintText.includes("bookings_no_student_overlap")) {
+        return { error: "You already have a lesson at that time. Pick another slot." };
+      }
       return { error: "That time was just booked by someone else — pick another slot." };
     }
     // Anything else is logged, never shown raw. The refusal a real user can hit
@@ -592,7 +601,8 @@ export async function cancelBooking(
     .maybeSingle();
 
   if (error) {
-    return { error: error.message };
+    log.error("cancel update failed", error, { bookingId: parsed.data.bookingId });
+    return { error: "We couldn't cancel that lesson. Please try again." };
   }
 
   if (!cancelled) {
